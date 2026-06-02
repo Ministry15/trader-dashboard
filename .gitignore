@@ -1,4 +1,21 @@
-node_modules/
-dist/
+# Segredos — NUNCA versionar
 .env
-.env.local
+
+# Ambiente virtual
+venv/
+
+# Artefactos Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Dados em runtime (base de dados, logs)
+data/
+
+# IDEs / editores
+.idea/
+.vscode/
+*.swp
+*.swo

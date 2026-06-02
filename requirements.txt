@@ -1,0 +1,13 @@
+web3==6.15.1
+python-dotenv==1.0.1
+requests==2.31.0
+aiohttp==3.9.3
+ccxt==4.2.99
+pandas==2.2.1
+numpy==1.26.4
+python-telegram-bot==20.8
+pyyaml==6.0.1
+schedule==1.2.1
+colorlog==6.8.2
+SQLAlchemy==2.0.27
+websockets==12.0

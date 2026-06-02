@@ -1,0 +1,198 @@
+# ==============================================================================
+# crypto_bsc — Configuração Principal (settings.yaml)
+# Rede: Binance Smart Chain (BSC) Mainnet — chain_id 56
+# Os segredos (chaves privadas, API keys) vivem no .env, NÃO aqui.
+# ==============================================================================
+
+network:
+  name: "BSC Mainnet"
+  chain_id: 56
+  rpc_url: "${BSC_RPC_URL}"
+  rpc_url_backup: "${BSC_RPC_URL_BACKUP}"
+  wss_url: "${BSC_WSS_URL}"
+  block_time_seconds: 3
+  explorer: "https://bscscan.com"
+  native_symbol: "BNB"
+
+# ------------------------------------------------------------------------------
+# TOKENS — endereços de contratos ERC-20 na BSC mainnet (todos 18 decimais
+# excepto onde indicado). Endereços em checksum.
+# ------------------------------------------------------------------------------
+tokens:
+  WBNB:
+    address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+    decimals: 18
+    symbol: "WBNB"
+    name: "Wrapped BNB"
+  USDT:
+    address: "0x55d398326f99059fF775485246999027B3197955"
+    decimals: 18
+    symbol: "USDT"
+    name: "Binance-Peg BSC-USD"
+  USDC:
+    address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"
+    decimals: 18
+    symbol: "USDC"
+    name: "Binance-Peg USD Coin"
+  BUSD:
+    address: "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56"
+    decimals: 18
+    symbol: "BUSD"
+    name: "Binance-Peg BUSD Token"
+  CAKE:
+    address: "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
+    decimals: 18
+    symbol: "CAKE"
+    name: "PancakeSwap Token"
+
+# ------------------------------------------------------------------------------
+# DEXs — routers e factories (Uniswap-V2 style) na BSC mainnet.
+# ------------------------------------------------------------------------------
+dexes:
+  pancakeswap_v2:
+    name: "PancakeSwap V2"
+    router: "0x10ED43C718714eb63d5aA57B78B54704E256024E"
+    factory: "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+    init_code_hash: "0x00fb7f630766e6a796048ea87d01acd3068e8ff67d078148a3fa3f4a84f69bd5"
+    fee_bps: 25            # 0.25%
+    type: "uniswap_v2"
+
+  pancakeswap_v3:
+    name: "PancakeSwap V3"
+    router: "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4"   # Smart Router
+    factory: "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
+    quoter: "0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997"
+    type: "uniswap_v3"
+    fee_tiers_bps: [1, 5, 25, 100]   # 0.01% / 0.05% / 0.25% / 1%
+
+  biswap:
+    name: "BiSwap"
+    router: "0x3a6d8cA21D1CF76F653A67577FA0D27453350dD8"
+    factory: "0x858E3312ed3A876947EA49d572A7C42DE08af7EE"
+    init_code_hash: "0xfea293c909d87cd4153593f077b76bb7e94340200f4ee84211ae8e4f9bd7ffdf"
+    fee_bps: 10            # 0.10%
+    type: "uniswap_v2"
+
+  apeswap:
+    name: "ApeSwap"
+    router: "0xcF0feBd3f17CEf5b47b0cD257aCf6025c5BFf3b7"
+    factory: "0x0841BD0B734E4F5853f0dD8d7Ea041c241fb0Da6"
+    init_code_hash: "0xf4ccce374816856d11f00e4069e7cada164065686fbef53c6167a63ec2fd8c5b"
+    fee_bps: 20            # 0.20%
+    type: "uniswap_v2"
+
+# ------------------------------------------------------------------------------
+# EXCHANGES CENTRALIZADAS (ccxt) — credenciais via .env.
+# ------------------------------------------------------------------------------
+exchanges:
+  binance:
+    enabled: true
+    api_key: "${BINANCE_API_KEY}"
+    api_secret: "${BINANCE_SECRET_KEY}"
+    rate_limit: true
+
+# ------------------------------------------------------------------------------
+# ESTRATÉGIA DE TRADING / ARBITRAGEM
+# ------------------------------------------------------------------------------
+trading:
+  dry_run: true                  # sobrepõe-se a tudo; espelha DRY_RUN no .env
+  base_token: "WBNB"
+  quote_tokens: ["USDT", "USDC", "BUSD"]
+  slippage_tolerance_bps: 50     # 0.50%
+  gas:
+    max_gas_price_gwei: 5
+    gas_limit: 350000
+    priority_gwei: 1
+  arbitrage:
+    enabled: true
+    min_profit_usd: 2.0
+    min_profit_bps: 30           # 0.30% líquido mínimo
+    max_trade_size_usd: 500
+    dex_pairs_to_scan:
+      - ["pancakeswap_v2", "biswap"]
+      - ["pancakeswap_v2", "apeswap"]
+      - ["biswap", "apeswap"]
+  risk:
+    max_daily_loss_usd: 50
+    max_open_positions: 3
+    stop_on_consecutive_failures: 5
+
+# ------------------------------------------------------------------------------
+# ORQUESTRADOR — que bots arrancam com o main.py (override via CLI ou env ENABLED_BOTS)
+# ------------------------------------------------------------------------------
+orchestrator:
+  enabled_bots:
+    - "arbitrage"
+    - "grid"
+    - "dca"
+    # - "sniper"   # desactivado: sem target_tokens configurados
+
+# ------------------------------------------------------------------------------
+# BOTS — parâmetros por estratégia
+# ------------------------------------------------------------------------------
+bots:
+  grid:
+    base: "WBNB"
+    quote: "USDT"
+    dex: "pancakeswap_v2"
+    lower_price: 600          # limite inferior da grelha (quote por base)
+    upper_price: 800          # limite superior
+    grid_levels: 10           # nº de linhas da grelha
+    order_size_quote: 50      # tamanho de cada ordem, em quote
+    poll_seconds: 10
+
+  dca:
+    base: "WBNB"
+    quote: "USDT"
+    dex: "pancakeswap_v2"
+    amount_quote: 25          # quanto comprar em cada intervalo
+    interval_seconds: 86400   # 24h
+
+  sniper:
+    quote: "WBNB"             # token usado para comprar (normalmente WBNB)
+    dex: "pancakeswap_v2"
+    buy_amount_quote: 0.05    # quanto WBNB gastar por snipe
+    max_price_impact_bps: 300 # impacto máximo aceitável na entrada (3%)
+    take_profit_bps: 5000     # +50% -> vender
+    stop_loss_bps: 2000       # -20% -> cortar
+    poll_seconds: 5
+    target_tokens: []         # endereços de tokens a vigiar
+
+# ------------------------------------------------------------------------------
+# NOTIFICAÇÕES
+# ------------------------------------------------------------------------------
+notifications:
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    chat_id: "${TELEGRAM_CHAT_ID}"
+    notify_on:
+      - "trade_executed"
+      - "error"
+      - "daily_summary"
+
+# ------------------------------------------------------------------------------
+# DADOS / PERSISTÊNCIA
+# ------------------------------------------------------------------------------
+database:
+  url: "${DATABASE_URL}"
+  echo: false
+
+# ------------------------------------------------------------------------------
+# LOGGING
+# ------------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  dir: "/opt/crypto_bsc/data/logs"
+  file: "crypto_bsc.log"
+  rotate_max_bytes: 10485760     # 10 MB
+  rotate_backups: 5
+  colored_console: true
+
+# ------------------------------------------------------------------------------
+# AGENDAMENTO (schedule)
+# ------------------------------------------------------------------------------
+scheduler:
+  scan_interval_seconds: 5
+  price_refresh_seconds: 3
+  daily_summary_time: "23:59"
