@@ -1,0 +1,37 @@
+[Unit]
+Description=crypto_bsc — Funding Rate Arbitrage + Grid CEX (Binance)
+Documentation=file:/opt/crypto_bsc/CLAUDE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/crypto_bsc
+# Corre o bot directamente com o Python do venv (3.11). NÃO usar o python3 do sistema.
+# PYTHONPATH necessário porque o entrypoint é bots/*.py e não main.py.
+Environment=PYTHONPATH=/opt/crypto_bsc
+ExecStart=/opt/crypto_bsc/venv/bin/python /opt/crypto_bsc/bots/funding_rate_bot.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tgbot-funding
+
+# --- Endurecimento de segurança ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/crypto_bsc/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
