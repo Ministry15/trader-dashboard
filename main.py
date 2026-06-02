@@ -27,6 +27,7 @@ from bots.funding_rate_bot import FundingRateBot
 from bots.grid_bot import GridBot
 from bots.pepe_grid_bot import PepeGridBot
 from bots.sniper_bot import SniperBot
+from bots.solana_grid_bot import SolanaGridBot
 from utils.config import get_env, get_settings
 from utils.logger import setup_logging
 from utils.notifier import TelegramNotifier
@@ -47,6 +48,8 @@ BOT_REGISTRY = {
                   lambda s: int(s["bots"]["sniper"].get("poll_seconds", 5))),
     "funding_rate": (FundingRateBot, "tick",
                      lambda s: int(s.get("bots", {}).get("funding_rate", {}).get("poll_seconds", 30))),
+    "solana_grid": (SolanaGridBot, "tick",
+                    lambda s: int(s["bots"]["solana_grid"].get("poll_seconds", 10))),
 }
 
 

@@ -132,6 +132,7 @@ orchestrator:
     - "pepe_grid"
     - "dca"
     - "funding_rate"
+    - "solana_grid"
     # - "sniper"   # desactivado: sem target_tokens configurados
 
 # ------------------------------------------------------------------------------
@@ -165,6 +166,16 @@ bots:
     dex: "pancakeswap_v2"
     amount_quote: 25          # quanto comprar em cada intervalo
     interval_seconds: 86400   # 24h
+
+  solana_grid:
+    wallet: "5d4U3JpDzxMgEC6U3KMt2F3aGPcC8qJjER5B4bK6yWtZ"
+    base: "SOL"
+    quote: "USDC"
+    range_pct: 0.15           # ±15% do preço live no arranque
+    grid_levels: 20
+    order_size_quote: 5       # $5 por ordem
+    poll_seconds: 10
+    recenter_threshold_pct: 5 # recentra se preço sair do range em >5%
 
   sniper:
     quote: "WBNB"             # token usado para comprar (normalmente WBNB)
