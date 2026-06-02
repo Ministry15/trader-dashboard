@@ -25,6 +25,7 @@ from bots.arbitrage_bot import ArbitrageBot
 from bots.dca_bot import DCABot
 from bots.funding_rate_bot import FundingRateBot
 from bots.grid_bot import GridBot
+from bots.pepe_grid_bot import PepeGridBot
 from bots.sniper_bot import SniperBot
 from utils.config import get_env, get_settings
 from utils.logger import setup_logging
@@ -38,6 +39,8 @@ BOT_REGISTRY = {
                   lambda s: int(s.get("scheduler", {}).get("scan_interval_seconds", 5))),
     "grid":      (GridBot, "tick",
                   lambda s: int(s["bots"]["grid"].get("poll_seconds", 10))),
+    "pepe_grid": (PepeGridBot, "tick",
+                  lambda s: int(s["bots"]["pepe_grid"].get("poll_seconds", 10))),
     "dca":       (DCABot, "buy_once",
                   lambda s: int(s["bots"]["dca"].get("interval_seconds", 86400))),
     "sniper":    (SniperBot, "tick",

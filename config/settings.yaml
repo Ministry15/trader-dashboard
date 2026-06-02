@@ -44,6 +44,11 @@ tokens:
     decimals: 18
     symbol: "CAKE"
     name: "PancakeSwap Token"
+  PEPE:
+    address: "0x25d887Ce7a35172C62FeBFD67a1856F20FaEbB00"
+    decimals: 18
+    symbol: "PEPE"
+    name: "Pepe"
 
 # ------------------------------------------------------------------------------
 # DEXs — routers e factories (Uniswap-V2 style) na BSC mainnet.
@@ -124,6 +129,7 @@ orchestrator:
   enabled_bots:
     - "arbitrage"
     - "grid"
+    - "pepe_grid"
     - "dca"
     - "funding_rate"
     # - "sniper"   # desactivado: sem target_tokens configurados
@@ -141,6 +147,17 @@ bots:
     grid_levels: 10           # nº de linhas da grelha
     order_size_quote: 50      # tamanho de cada ordem, em quote
     poll_seconds: 10
+    recenter_threshold_pct: 5 # recentra se preço sair do range em >5%
+
+  pepe_grid:
+    base: "PEPE"
+    quote: "USDT"
+    dex: "pancakeswap_v2"
+    range_pct: 0.20           # ±20% do preço live no arranque (PEPE mais volátil)
+    grid_levels: 20           # 20 níveis
+    order_size_quote: 5       # $5 por ordem
+    poll_seconds: 10
+    recenter_threshold_pct: 5 # recentra se preço sair do range em >5%
 
   dca:
     base: "WBNB"
@@ -171,6 +188,7 @@ notifications:
       - "trade_executed"
       - "error"
       - "daily_summary"
+      - "grid_recentered"
 
 # ------------------------------------------------------------------------------
 # DADOS / PERSISTÊNCIA
