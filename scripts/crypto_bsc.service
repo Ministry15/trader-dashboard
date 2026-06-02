@@ -1,0 +1,37 @@
+[Unit]
+Description=crypto_bsc — orquestrador de bots de trading BSC
+Documentation=file:/opt/crypto_bsc/CLAUDE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/crypto_bsc
+# Corre o orquestrador com o Python do venv (3.11). NÃO usar o python3 do sistema.
+ExecStart=/opt/crypto_bsc/venv/bin/python /opt/crypto_bsc/main.py
+# Reinício automático em caso de falha (nunca em paragem limpa/HALT do risco).
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+# Logs vão para o journal (journalctl -u crypto_bsc).
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=crypto_bsc
+
+# --- Endurecimento de segurança ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/crypto_bsc/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
