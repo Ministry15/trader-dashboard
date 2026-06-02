@@ -125,6 +125,7 @@ orchestrator:
     - "arbitrage"
     - "grid"
     - "dca"
+    - "funding_rate"
     # - "sniper"   # desactivado: sem target_tokens configurados
 
 # ------------------------------------------------------------------------------
