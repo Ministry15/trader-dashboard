@@ -133,7 +133,7 @@ orchestrator:
     - "dca"
     - "funding_rate"
     - "solana_grid"
-    # - "sniper"   # desactivado: sem target_tokens configurados
+    - "sniper"
 
 # ------------------------------------------------------------------------------
 # BOTS — parâmetros por estratégia
