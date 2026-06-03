@@ -13,12 +13,16 @@ Níveis de TP:
 """
 from __future__ import annotations
 
+import socket
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 import requests
+
+# Garante que qualquer socket que ignore o timeout do requests também falha depressa
+socket.setdefaulttimeout(12)
 
 from utils.config import get_env, get_settings
 from utils.database import init_db, record_trade
@@ -133,7 +137,7 @@ class SolanaSniperBot:
 
     def _price(self, mint: str) -> Decimal | None:
         try:
-            resp = requests.get(_JUPITER_URL.format(mint=mint), timeout=8)
+            resp = requests.get(_JUPITER_URL.format(mint=mint), timeout=(5, 8))
             resp.raise_for_status()
             data = resp.json().get("data", {}).get(mint)
             if data:
@@ -146,7 +150,7 @@ class SolanaSniperBot:
 
     def _fetch_pumpfun(self) -> list[dict]:
         try:
-            resp = requests.get(_PUMPFUN_URL, timeout=10,
+            resp = requests.get(_PUMPFUN_URL, timeout=(5, 10),
                                 headers={"Accept": "application/json"})
             resp.raise_for_status()
             raw = resp.json()
@@ -158,7 +162,7 @@ class SolanaSniperBot:
 
     def _fetch_raydium(self) -> list[dict]:
         try:
-            resp = requests.get(_RAYDIUM_URL, timeout=10)
+            resp = requests.get(_RAYDIUM_URL, timeout=(5, 10))
             resp.raise_for_status()
             raw = resp.json()
             pools = raw if isinstance(raw, list) else raw.get("data", [])
