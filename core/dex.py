@@ -86,11 +86,14 @@ class Dex:
         return Web3.to_checksum_address(self.settings["tokens"]["WBNB"]["address"])
 
     def _build_path(self, token_in: str, token_out: str) -> list[str]:
-        """Caminho directo, ou via WBNB quando nenhum dos lados é WBNB."""
+        """Caminho directo se existir par, ou via WBNB como intermediário."""
         a_in, _ = self._token_meta(token_in)
         a_out, _ = self._token_meta(token_out)
         wbnb = self._wbnb()
         if a_in == wbnb or a_out == wbnb:
+            return [a_in, a_out]
+        # Par directo (ex: USDT/token) — preferir se existir
+        if self.has_liquidity(token_in, token_out):
             return [a_in, a_out]
         return [a_in, wbnb, a_out]
 

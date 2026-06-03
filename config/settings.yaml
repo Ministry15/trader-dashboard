@@ -178,9 +178,9 @@ bots:
     recenter_threshold_pct: 5 # recentra se preço sair do range em >5%
 
   sniper:
-    quote: "WBNB"             # token usado para comprar (normalmente WBNB)
+    quote: "USDT"             # novos tokens BSC usam USDT como quote (não WBNB)
     dex: "pancakeswap_v2"
-    buy_amount_quote: 0.05    # quanto WBNB gastar por snipe
+    buy_amount_quote: 30      # 30 USDT por entrada (~equivalente a 0.05 WBNB)
     max_price_impact_bps: 300 # impacto máximo aceitável na entrada (3%)
     take_profit_bps: 5000     # +50% -> vender
     stop_loss_bps: 2000       # -20% -> cortar

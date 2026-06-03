@@ -143,7 +143,10 @@ class SniperBot:
     def _refresh_targets(self) -> None:
         """Chama o token scanner e actualiza self.targets com novos candidatos."""
         from utils.token_scanner import scan
-        cfg_disc = self.settings["bots"]["sniper"].get("auto_discovery", {})
+        cfg_disc = {
+            **self.settings["bots"]["sniper"].get("auto_discovery", {}),
+            "quote_symbol": self.quote,  # limitar scanner ao quote do sniper
+        }
         try:
             discovered = scan(cfg_disc)
         except Exception:
