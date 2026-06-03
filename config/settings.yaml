@@ -134,6 +134,7 @@ orchestrator:
     - "funding_rate"
     - "solana_grid"
     - "sniper"
+    - "solana_sniper"
 
 # ------------------------------------------------------------------------------
 # BOTS — parâmetros por estratégia
@@ -197,6 +198,18 @@ bots:
       safety_check: true          # verificar honeypot/tax/rug via GoPlus
       safety_require_goplus: false  # false=aceitar tokens sem dados GoPlus (muito novos)
       blacklist: []               # endereços a ignorar sempre
+
+  solana_sniper:
+    wallet: "5d4U3JpDzxMgEC6U3KMt2F3aGPcC8qJjER5B4bK6yWtZ"
+    entry_usd: 2                     # $2 por posição
+    max_positions: 5                 # máx. posições abertas simultâneas
+    max_capital_usd: 10              # capital total máx. (5 × $2)
+    poll_seconds: 15                 # scan a cada 15s
+    max_age_minutes: 30              # ignorar tokens > 30min
+    min_liquidity_usd: 1000          # liquidez mínima $1,000
+    top10_holders_max_pct: 30        # top 10 holders < 30% do supply
+    summary_interval_seconds: 3600   # resumo Telegram de hora em hora
+    blacklist: []                    # mints a ignorar sempre (populado via SL)
 
 # ------------------------------------------------------------------------------
 # NOTIFICAÇÕES

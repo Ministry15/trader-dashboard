@@ -152,11 +152,60 @@ def _tab_dca(settings: dict, dry_run: bool) -> list[str]:
     return lines
 
 
+def _tab_sniper(settings: dict, dry_run: bool) -> list[str]:
+    """Tab Sniper — subseparadores: BSC Sniper + 🟣 Solana Sniper."""
+    lines: list[str] = []
+    lines.append("")
+    lines.append("  ▶  SNIPER BOTS")
+    lines.append("")
+
+    # ── Sub-tab 1: BSC Sniper ─────────────────────────────────────────────
+    sn = settings["bots"].get("sniper", {})
+    disc = sn.get("auto_discovery", {})
+    lines.append(_box_top("BSC Sniper  (PancakeSwap V2)"))
+    lines.append(_row(f"Quote:       {sn.get('quote', 'USDT')}"))
+    lines.append(_row(f"Buy amount:  ${sn.get('buy_amount_quote', '?')} {sn.get('quote', 'USDT')}"))
+    lines.append(_row(f"TP:          +{sn.get('take_profit_bps', '?')}bps  "
+                      f"SL: -{sn.get('stop_loss_bps', '?')}bps"))
+    lines.append(_row(f"Max impact:  {sn.get('max_price_impact_bps', '?')}bps"))
+    lines.append(_row(f"Auto-disc:   {disc.get('enabled', False)}  "
+                      f"scan={disc.get('scan_interval_seconds', '?')}s"))
+    lines.append(_row(f"Poll:        {sn.get('poll_seconds', 30)}s"))
+    lines.append(_row(f"DRY_RUN:     {dry_run}"))
+    lines.append(_box_bot())
+    lines.append("")
+
+    # ── Sub-tab 2: 🟣 Solana Sniper ───────────────────────────────────────
+    ss = settings.get("bots", {}).get("solana_sniper", {})
+    wallet = ss.get("wallet", "")
+    wallet_short = (wallet[:12] + "…" + wallet[-4:]) if len(wallet) > 20 else wallet or "(none)"
+
+    tp_summary = "TP1 +20%→25%  TP2 +50%→25%  TP3 +100%→25%  TP4 +300%→15%  Moonbag 10%"
+
+    lines.append(_box_top("🟣 Solana Sniper  (Pump.fun + Raydium / Jupiter)"))
+    lines.append(_row(f"Entry:       ${ss.get('entry_usd', 2):.0f} USDT / posição"))
+    lines.append(_row(f"Max pos:     {ss.get('max_positions', 5)}  "
+                      f"Cap: ${ss.get('max_capital_usd', 10):.0f} USDT"))
+    lines.append(_row(f"Stop-loss:   -30% (fixo, blacklist automática)"))
+    lines.append(_row(tp_summary[:_W - 6]))
+    lines.append(_row(f"Filtros:     criado <{ss.get('max_age_minutes', 30)}min  "
+                      f"liq>${ss.get('min_liquidity_usd', 1000):.0f}  "
+                      f"top10<{ss.get('top10_holders_max_pct', 30)}%"))
+    lines.append(_row(f"Sources:     Pump.fun API  +  Raydium new pools"))
+    lines.append(_row(f"Poll:        {ss.get('poll_seconds', 15)}s"))
+    lines.append(_row(f"Resumo:      a cada {ss.get('summary_interval_seconds', 3600)//60}min (Telegram)"))
+    lines.append(_row(f"Wallet:      {wallet_short}"))
+    lines.append(_row(f"DRY_RUN:     {dry_run}"))
+    lines.append(_box_bot())
+
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # Render
 # ---------------------------------------------------------------------------
 
-TAB_LABELS = ["Arbitrage", "Grid", "DCA"]
+TAB_LABELS = ["Arbitrage", "Grid", "DCA", "Sniper"]
 
 
 def _render(tab: Optional[str], settings: dict, dry_run: bool) -> list[str]:
@@ -186,6 +235,8 @@ def _render(tab: Optional[str], settings: dict, dry_run: bool) -> list[str]:
         out.extend(_tab_arbitrage(settings, dry_run))
     if want in ("dca", "all"):
         out.extend(_tab_dca(settings, dry_run))
+    if want in ("sniper", "all"):
+        out.extend(_tab_sniper(settings, dry_run))
 
     out.append("")
     return out
