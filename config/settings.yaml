@@ -184,8 +184,18 @@ bots:
     max_price_impact_bps: 300 # impacto máximo aceitável na entrada (3%)
     take_profit_bps: 5000     # +50% -> vender
     stop_loss_bps: 2000       # -20% -> cortar
-    poll_seconds: 5
-    target_tokens: []         # endereços de tokens a vigiar
+    poll_seconds: 30          # intervalo de gestão de posições (s)
+    target_tokens: []         # tokens fixos adicionais (opcional)
+
+    auto_discovery:
+      enabled: true
+      scan_interval_seconds: 300  # re-scan a cada 5 min via GeckoTerminal
+      min_volume_usd: 100000      # volume 24h > $100k
+      min_liquidity_usd: 50000    # liquidez (TVL) > $50k
+      max_age_days: 7             # pool criado há menos de 7 dias
+      max_tokens: 10              # máx. tokens em carteira simultaneamente
+      safety_check: true          # verificar honeypot/tax/rug via GoPlus
+      blacklist: []               # endereços a ignorar sempre
 
 # ------------------------------------------------------------------------------
 # NOTIFICAÇÕES
