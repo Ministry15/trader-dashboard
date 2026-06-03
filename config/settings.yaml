@@ -195,6 +195,7 @@ bots:
       max_age_days: 7             # pool criado há menos de 7 dias
       max_tokens: 10              # máx. tokens em carteira simultaneamente
       safety_check: true          # verificar honeypot/tax/rug via GoPlus
+      safety_require_goplus: false  # false=aceitar tokens sem dados GoPlus (muito novos)
       blacklist: []               # endereços a ignorar sempre
 
 # ------------------------------------------------------------------------------
@@ -206,7 +207,6 @@ notifications:
     bot_token: "${TELEGRAM_BOT_TOKEN}"
     chat_id: "${TELEGRAM_CHAT_ID}"
     notify_on:
-      - "trade_executed"
       - "error"
       - "daily_summary"
       - "grid_recentered"
