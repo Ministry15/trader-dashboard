@@ -117,7 +117,12 @@ class SniperBot:
     def manage(self, token: str) -> dict:
         """Reavalia uma posição e sai por TP/SL se aplicável."""
         pos = self.positions[token]
-        current_value = self.dex.quote(token, self.quote, pos.token_amount)
+        try:
+            current_value = self.dex.quote(token, self.quote, pos.token_amount)
+        except Exception as exc:
+            # Pool sem liquidez (rug pull / honeypot): forçar stop_loss imediato
+            logger.warning("quote falhou para %s (%s) — stop_loss forçado", token, exc)
+            current_value = Decimal("0")
         pnl = current_value - pos.spent_quote
         pnl_bps = (pnl / pos.spent_quote) * Decimal(10_000) if pos.spent_quote else Decimal(0)
         action = self._decide_exit(pnl_bps)

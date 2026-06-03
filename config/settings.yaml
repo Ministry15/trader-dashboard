@@ -184,7 +184,7 @@ bots:
     buy_amount_quote: 30      # 30 USDT por entrada (~equivalente a 0.05 WBNB)
     max_price_impact_bps: 300 # impacto máximo aceitável na entrada (3%)
     take_profit_bps: 5000     # +50% -> vender
-    stop_loss_bps: 2000       # -20% -> cortar
+    stop_loss_bps: 3000       # -30% -> cortar
     poll_seconds: 30          # intervalo de gestão de posições (s)
     target_tokens: []         # tokens fixos adicionais (opcional)
 
