@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 
 from core.dex import Dex
 from core.risk_manager import RiskManager
@@ -44,7 +45,14 @@ class SniperBot:
         self.tp_bps = Decimal(str(cfg["take_profit_bps"]))
         self.sl_bps = Decimal(str(cfg["stop_loss_bps"]))
         self.poll_seconds = int(cfg.get("poll_seconds", 5))
-        self.targets = list(targets if targets is not None else cfg.get("target_tokens", []))
+        self.targets: list[str] = list(targets if targets is not None else cfg.get("target_tokens", []))
+
+        # Auto-discovery
+        _disc = cfg.get("auto_discovery", {})
+        self.auto_discovery: bool = bool(_disc.get("enabled", False))
+        self.scan_interval: int = int(_disc.get("scan_interval_seconds", 300))
+        self.max_tokens: int = int(_disc.get("max_tokens", 10))
+        self._last_scan: float = 0.0  # força scan imediato no primeiro tick
 
         self.wallet = Wallet(self.settings)
         self.dex = Dex(cfg["dex"], wallet=self.wallet, settings=self.settings)
@@ -132,7 +140,29 @@ class SniperBot:
                     action.upper(), token, pnl, self.quote, pnl_bps)
         return {"action": action, "pnl_bps": pnl_bps, "pnl": pnl, "result": result}
 
+    def _refresh_targets(self) -> None:
+        """Chama o token scanner e actualiza self.targets com novos candidatos."""
+        from utils.token_scanner import scan
+        cfg_disc = self.settings["bots"]["sniper"].get("auto_discovery", {})
+        try:
+            discovered = scan(cfg_disc)
+        except Exception:
+            logger.exception("Erro no auto-discovery scan")
+            return
+        new = [t for t in discovered if t not in self.targets]
+        if new:
+            logger.info("Auto-discovery: %d novo(s) token(s) adicionado(s): %s", len(new), new)
+            combined = list(dict.fromkeys(self.targets + new))  # preserva ordem, sem duplicados
+            if self.max_tokens:
+                combined = combined[: self.max_tokens]
+            self.targets = combined
+        else:
+            logger.info("Auto-discovery: nenhum token novo (targets actuais: %d)", len(self.targets))
+        self._last_scan = time.time()
+
     def tick(self) -> list[dict]:
+        if self.auto_discovery and (time.time() - self._last_scan) >= self.scan_interval:
+            self._refresh_targets()
         out = []
         for token in self.targets:
             if token not in self.positions:
