@@ -28,6 +28,14 @@ _STABLE_QUOTES = {
     "0x55d398326f99059ff775485246999027b3197955",  # USDT BSC
     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # USDC BSC
 }
+# Mapa símbolo → endereço para resolver quote_symbol passado pelo sniper
+_SYMBOL_TO_ADDR: dict[str, str] = {
+    "WBNB": _WBNB,
+    "BNB":  _WBNB,
+    "USDT": "0x55d398326f99059ff775485246999027b3197955",
+    "USDC": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+    "BUSD": "0xe9e7cea3dedca5984780bafc599bd69add087d56",
+}
 _TIMEOUT = 12
 
 
@@ -127,9 +135,16 @@ def scan(cfg: dict) -> list[str]:
     blacklist = {a.lower() for a in cfg.get("blacklist", [])}
     max_tokens = int(cfg.get("max_tokens", 10))
 
+    # Se o sniper passou o seu quote_symbol, só aceitar pools com esse quote
+    quote_sym = cfg.get("quote_symbol", "").upper()
+    if quote_sym and quote_sym in _SYMBOL_TO_ADDR:
+        _valid_quotes: set[str] = {_SYMBOL_TO_ADDR[quote_sym]}
+        logger.debug("Scanner: filtrar por quote=%s (%s)", quote_sym, _SYMBOL_TO_ADDR[quote_sym])
+    else:
+        _valid_quotes = {_WBNB} | _STABLE_QUOTES
+
     now = datetime.now(timezone.utc)
     candidates: list[str] = []
-    _valid_quotes = {_WBNB} | _STABLE_QUOTES
 
     for page in range(1, 6):  # até 100 pools por scan (5 páginas × 20)
         pools = _gecko_pools_page(page)
