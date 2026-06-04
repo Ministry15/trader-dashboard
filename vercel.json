@@ -1,31 +1,12 @@
 {
-  "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "build"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/static/(.*)",
-      "dest": "/static/$1"
+      "source": "/api-proxy/:path*",
+      "destination": "http://178.104.133.71:8000/:path*"
     },
     {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
-  ],
-  "headers": [
-    {
       "source": "/(.*)",
-      "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options",        "value": "DENY" }
-      ]
+      "destination": "/"
     }
   ]
 }
