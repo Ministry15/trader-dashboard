@@ -401,18 +401,174 @@ function SniperTab({ data }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TAB: GRID — Bot Panel (sub-tab content)
+// ─────────────────────────────────────────────────────────────────────────────
+function GridBotPanel({ bot, allTrades, onBack }) {
+  const botTrades = allTrades.filter(
+    (t) => (t.pair ?? '').toUpperCase() === (bot.pair ?? '').toUpperCase()
+  );
+
+  const botPnl = botTrades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
+  const buys   = botTrades.filter((t) => (t.side ?? '').toLowerCase() === 'buy').length;
+  const sells  = botTrades.filter((t) => (t.side ?? '').toLowerCase() === 'sell').length;
+
+  // cumulative P&L chart — oldest first
+  let running = 0;
+  const chartData = [...botTrades].reverse().map((_, i, arr) => {
+    running += Number(arr[i].pnl ?? 0);
+    return { n: i + 1, pnl: Number(running.toFixed(4)) };
+  });
+
+  const status  = bot.status ?? 'dry_run';
+  const isLive  = /^live|running$/i.test(status);
+
+  // price position within range (0–100 %)
+  let pricePct = null;
+  if (bot.price != null && bot.lower != null && bot.upper != null && bot.upper > bot.lower) {
+    pricePct = Math.min(100, Math.max(0,
+      ((bot.price - bot.lower) / (bot.upper - bot.lower)) * 100
+    ));
+  }
+  const inRange = pricePct !== null && pricePct >= 0 && pricePct <= 100;
+
+  const gradId = `grad-${(bot.pair ?? 'bot').replace('/', '-')}`;
+
+  return (
+    <div>
+      {/* KPIs */}
+      <div className="grid-4 section-gap">
+        <div className="stat-tile">
+          <div className="stat-label">Preço Actual</div>
+          <div className={`stat-value ${!inRange ? 'negative' : 'neutral'}`} style={{ fontSize: 18 }}>
+            {bot.price != null ? fmt(bot.price, 4) : '—'}
+          </div>
+          <div className="stat-sub" style={{ color: inRange ? 'var(--green)' : 'var(--red)' }}>
+            {pricePct !== null ? (inRange ? 'dentro do range' : 'fora do range') : ''}
+          </div>
+        </div>
+
+        <div className="stat-tile">
+          <div className="stat-label">Range</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+            <span className="mono dim" style={{ fontSize: 13 }}>{bot.lower != null ? fmt(bot.lower, 4) : '—'}</span>
+            <span className="mono dim" style={{ fontSize: 13 }}>{bot.upper != null ? fmt(bot.upper, 4) : '—'}</span>
+          </div>
+          {pricePct !== null && (
+            <div className="range-bar-wrap">
+              <div className="range-bar-fill" style={{ left: 0, width: '100%' }} />
+              <div className="range-bar-price" style={{ left: `${pricePct}%` }} />
+            </div>
+          )}
+          {bot.range && <div className="stat-sub" style={{ marginTop: 10 }}>{bot.range}</div>}
+        </div>
+
+        <div className="stat-tile">
+          <div className="stat-label">Níveis / Estado</div>
+          <div className="stat-value neutral" style={{ fontSize: 22 }}>{bot.levels ?? '—'}</div>
+          <div style={{ marginTop: 8 }}>
+            <span className={`badge ${isLive ? 'badge-green' : 'badge-yellow'}`}>{status}</span>
+          </div>
+        </div>
+
+        <div className="stat-tile">
+          <div className="stat-label">P&amp;L Bot</div>
+          <div className={`stat-value ${botPnl < 0 ? 'negative' : ''}`} style={{ fontSize: 18 }}>
+            {fmtUSD(botPnl)}
+          </div>
+          <div className="stat-sub">{buys}B / {sells}S · {botTrades.length} trades</div>
+        </div>
+      </div>
+
+      {/* Cumulative P&L chart */}
+      {chartData.length > 1 && (
+        <div className="card section-gap">
+          <div className="card-title"><Activity size={14} />P&amp;L Acumulado — {bot.pair}</div>
+          <ResponsiveContainer width="100%" height={160}>
+            <AreaChart data={chartData}>
+              <defs>
+                <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={botPnl >= 0 ? '#00ff88' : '#ff4466'} stopOpacity={0.2} />
+                  <stop offset="95%" stopColor={botPnl >= 0 ? '#00ff88' : '#ff4466'} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a33" />
+              <XAxis dataKey="n" tick={{ fill: '#7070a0', fontSize: 10 }} />
+              <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} />
+              <Tooltip content={<CustomTooltip />} />
+              <ReferenceLine y={0} stroke="#333360" />
+              <Area
+                type="monotone"
+                dataKey="pnl"
+                name="P&L USDT"
+                stroke={botPnl >= 0 ? '#00ff88' : '#ff4466'}
+                fill={`url(#${gradId})`}
+                strokeWidth={2}
+                dot={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Trades table */}
+      <div className="card">
+        <div className="card-title"><Target size={14} />Trades Recentes — {bot.pair}</div>
+        {botTrades.length === 0 ? (
+          <div className="empty-state">Sem trades para {bot.pair}</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Side</th>
+                  <th>Preço</th>
+                  <th>P&amp;L</th>
+                  <th>Timestamp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {botTrades.slice(0, 30).map((t, i) => (
+                  <tr key={i}>
+                    <td className="dim mono" style={{ fontSize: 10 }}>{botTrades.length - i}</td>
+                    <td>
+                      <span className={`badge ${(t.side ?? '').toLowerCase() === 'buy' ? 'badge-green' : 'badge-red'}`}>
+                        {t.side ?? '—'}
+                      </span>
+                    </td>
+                    <td className="mono">{t.price != null ? fmt(t.price, 4) : '—'}</td>
+                    <td className={`mono ${clr(t.pnl)}`}>{t.pnl != null ? fmtUSD(t.pnl) : 'dry_run'}</td>
+                    <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TAB: GRID
 // API: { total_pnl, total_trades, recent_trades: [{side, pair, price, pnl, timestamp}],
 //        active_bots, active_grids: [{bot, pair, price, range, levels, lower, upper, status}] }
 // ─────────────────────────────────────────────────────────────────────────────
 function GridTab({ data }) {
+  const [subTab, setSubTab] = useState('overview');
   if (!data) return <Loader />;
 
   const bots   = data.active_grids ?? [];
   const trades = data.recent_trades ?? [];
 
+  // keep subTab valid when data refreshes
+  const validPairs = bots.map((b) => b.pair);
+  const active = validPairs.includes(subTab) ? subTab : 'overview';
+
   return (
     <div>
+      {/* Summary KPIs — always visible */}
       <div className="grid-3 section-gap">
         <div className="stat-tile">
           <div className="stat-label">Bots Activos</div>
@@ -430,76 +586,120 @@ function GridTab({ data }) {
         </div>
       </div>
 
-      <div className="card section-gap">
-        <div className="card-title"><Grid size={14} />Grid Bots Activos</div>
-        {bots.length === 0 ? (
-          <div className="empty-state">Sem bots activos detectados nos logs</div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Bot</th>
-                  <th>Par</th>
-                  <th>Preço</th>
-                  <th>Lower</th>
-                  <th>Upper</th>
-                  <th>Range</th>
-                  <th>Níveis</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bots.map((b, i) => (
-                  <tr key={i}>
-                    <td className="dim" style={{ fontSize: 11 }}>{b.bot ?? '—'}</td>
-                    <td style={{ fontWeight: 700 }}>{b.pair ?? '—'}</td>
-                    <td className="mono">{b.price != null ? fmt(b.price, 4) : '—'}</td>
-                    <td className="mono dim">{b.lower != null ? fmt(b.lower, 4) : '—'}</td>
-                    <td className="mono dim">{b.upper != null ? fmt(b.upper, 4) : '—'}</td>
-                    <td className="mono">{b.range ?? '—'}</td>
-                    <td className="mono">{b.levels ?? '—'}</td>
-                    <td><span className="badge badge-yellow">dry_run</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {trades.length > 0 && (
+      {bots.length === 0 ? (
         <div className="card">
-          <div className="card-title"><Activity size={14} />Trades Recentes</div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Par</th>
-                  <th>Side</th>
-                  <th>Preço</th>
-                  <th>P&amp;L</th>
-                  <th>Timestamp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trades.slice(0, 30).map((t, i) => (
-                  <tr key={i}>
-                    <td style={{ fontWeight: 700 }}>{t.pair ?? '—'}</td>
-                    <td>
-                      <span className={`badge ${(t.side ?? '').toLowerCase() === 'buy' ? 'badge-green' : 'badge-red'}`}>
-                        {t.side ?? '—'}
-                      </span>
-                    </td>
-                    <td className="mono">{t.price != null ? fmt(t.price, 4) : '—'}</td>
-                    <td className={`mono ${clr(t.pnl)}`}>{t.pnl != null ? fmtUSD(t.pnl) : 'dry_run'}</td>
-                    <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <div className="empty-state">Sem bots activos detectados nos logs</div>
         </div>
+      ) : (
+        <>
+          {/* Sub-tab nav */}
+          <div className="sub-tabs">
+            <button
+              className={`sub-tab ${active === 'overview' ? 'active' : ''}`}
+              onClick={() => setSubTab('overview')}
+            >
+              <Grid size={12} />Overview
+            </button>
+            {bots.map((b) => (
+              <button
+                key={b.pair}
+                className={`sub-tab ${active === b.pair ? 'active' : ''}`}
+                onClick={() => setSubTab(b.pair)}
+              >
+                {b.pair}
+              </button>
+            ))}
+          </div>
+
+          {/* Overview sub-tab */}
+          {active === 'overview' && (
+            <>
+              <div className="card section-gap">
+                <div className="card-title"><Grid size={14} />Grid Bots Activos</div>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Bot</th>
+                        <th>Par</th>
+                        <th>Preço</th>
+                        <th>Lower</th>
+                        <th>Upper</th>
+                        <th>Range</th>
+                        <th>Níveis</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bots.map((b, i) => (
+                        <tr key={i} style={{ cursor: 'pointer' }} onClick={() => setSubTab(b.pair)}>
+                          <td className="dim" style={{ fontSize: 11 }}>{b.bot ?? '—'}</td>
+                          <td style={{ fontWeight: 700, color: 'var(--blue)' }}>{b.pair ?? '—'}</td>
+                          <td className="mono">{b.price != null ? fmt(b.price, 4) : '—'}</td>
+                          <td className="mono dim">{b.lower != null ? fmt(b.lower, 4) : '—'}</td>
+                          <td className="mono dim">{b.upper != null ? fmt(b.upper, 4) : '—'}</td>
+                          <td className="mono">{b.range ?? '—'}</td>
+                          <td className="mono">{b.levels ?? '—'}</td>
+                          <td>
+                            <span className={`badge ${/^live|running$/i.test(b.status ?? '') ? 'badge-green' : 'badge-yellow'}`}>
+                              {b.status ?? 'dry_run'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {trades.length > 0 && (
+                <div className="card">
+                  <div className="card-title"><Activity size={14} />Todos os Trades Recentes</div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Par</th>
+                          <th>Side</th>
+                          <th>Preço</th>
+                          <th>P&amp;L</th>
+                          <th>Timestamp</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trades.slice(0, 30).map((t, i) => (
+                          <tr key={i}>
+                            <td
+                              style={{ fontWeight: 700, color: 'var(--blue)', cursor: 'pointer' }}
+                              onClick={() => setSubTab(t.pair)}
+                            >
+                              {t.pair ?? '—'}
+                            </td>
+                            <td>
+                              <span className={`badge ${(t.side ?? '').toLowerCase() === 'buy' ? 'badge-green' : 'badge-red'}`}>
+                                {t.side ?? '—'}
+                              </span>
+                            </td>
+                            <td className="mono">{t.price != null ? fmt(t.price, 4) : '—'}</td>
+                            <td className={`mono ${clr(t.pnl)}`}>{t.pnl != null ? fmtUSD(t.pnl) : 'dry_run'}</td>
+                            <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Per-bot sub-tabs */}
+          {bots.map((b) =>
+            active === b.pair
+              ? <GridBotPanel key={b.pair} bot={b} allTrades={trades} />
+              : null
+          )}
+        </>
       )}
     </div>
   );
