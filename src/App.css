@@ -148,7 +148,14 @@ html, body, #root {
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
 }
+
+.tabs::-webkit-scrollbar { height: 3px; }
+.tabs::-webkit-scrollbar-track { background: var(--bg2); }
+.tabs::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 .tab {
   display: flex;
