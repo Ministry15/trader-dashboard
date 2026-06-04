@@ -867,7 +867,7 @@ export default function App() {
         })}
       </nav>
 
-      <main className="content">
+      <main className="content" key={activeTab}>
         {activeTab === 'overview' && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} />}
         {activeTab === 'ibkr'     && (errors.ibkr    ? <ErrBox msg={errors.ibkr}    /> : <IBKRTab    data={ibkr}    />)}
         {activeTab === 'sniper'   && (errors.sniper  ? <ErrBox msg={errors.sniper}  /> : <SniperTab  data={sniper}  />)}

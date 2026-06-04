@@ -39,7 +39,10 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+  position: fixed;
+  inset: 0;
 }
 
 /* ─── Header ────────────────────────────────────────────────── */
@@ -51,6 +54,7 @@ html, body, #root {
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  z-index: 10;
 }
 
 .header-logo {
@@ -143,6 +147,7 @@ html, body, #root {
 /* ─── Tabs ──────────────────────────────────────────────────── */
 .tabs {
   display: flex;
+  flex-wrap: nowrap;
   gap: 2px;
   padding: 8px 24px 0;
   background: var(--bg2);
@@ -151,11 +156,13 @@ html, body, #root {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
+  overscroll-behavior-x: contain;
+  z-index: 10;
 }
 
-.tabs::-webkit-scrollbar { height: 3px; }
-.tabs::-webkit-scrollbar-track { background: var(--bg2); }
-.tabs::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+/* hide scrollbar but keep scroll functional */
+.tabs::-webkit-scrollbar { display: none; }
+.tabs { scrollbar-width: none; -ms-overflow-style: none; }
 
 .tab {
   display: flex;
@@ -195,7 +202,11 @@ html, body, #root {
 .content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
   padding: 20px 24px;
+  min-height: 0;
 }
 
 /* ─── Cards / Panels ────────────────────────────────────────── */
@@ -229,6 +240,27 @@ html, body, #root {
 @media (max-width: 1200px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 900px)  { .grid-3, .grid-2 { grid-template-columns: 1fr; } }
 @media (max-width: 700px)  { .grid-4 { grid-template-columns: 1fr; } }
+
+/* ─── Mobile ────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .header {
+    padding: 10px 16px;
+    gap: 8px;
+  }
+
+  .header-title { font-size: 13px; }
+  .header-subtitle { display: none; }
+
+  .header-right { gap: 8px; }
+
+  .status-pill { font-size: 10px; }
+
+  .tabs { padding: 6px 12px 0; gap: 0; }
+
+  .tab { padding: 8px 12px; font-size: 12px; gap: 5px; }
+
+  .content { padding: 12px 16px; }
+}
 
 /* ─── KPI / Stat tiles ──────────────────────────────────────── */
 .stat-tile {
