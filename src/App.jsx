@@ -79,7 +79,7 @@ function OverviewTab({ pnl, ibkr, sniper, grid, funding }) {
     pnl: d.pnl  ?? d.value ?? 0,
   }));
 
-  const regime = ibkr?.regime ?? ibkr?.market_regime ?? 'unknown';
+  const regime = String(ibkr?.regime?.regime ?? ibkr?.regime ?? ibkr?.market_regime ?? 'unknown');
   const regimeClass = regime.toLowerCase().includes('bull') ? 'bull'
     : regime.toLowerCase().includes('bear') ? 'bear'
     : regime.toLowerCase().includes('range') || regime.toLowerCase().includes('sideways') ? 'range'
