@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 
 // ─── API client ─────────────────────────────────────────────────────────────
-const BASE = 'http://178.104.133.71:8000';
+const BASE = '/api-proxy';
 const HEADERS = { 'x-api-key': 'JPxK9m2026TraderB0t!', 'Content-Type': 'application/json' };
 
 async function apiFetch(endpoint) {
