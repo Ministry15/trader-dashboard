@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  AreaChart, Area, BarChart, Bar, LineChart, Line,
+  AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts';
 import {
   Activity, TrendingUp, TrendingDown, Zap, Grid, DollarSign,
-  Server, FileText, RefreshCw, Wifi, WifiOff, AlertTriangle,
+  Server, FileText, RefreshCw, AlertTriangle,
   CheckCircle, XCircle, Clock, Cpu, HardDrive, MemoryStick,
-  ChevronRight, BarChart2, Target, Shield
+  BarChart2, Target, Shield
 } from 'lucide-react';
 
-// ─── API client ─────────────────────────────────────────────────────────────
+// ─── API client ──────────────────────────────────────────────────────────────
 const BASE = '/api-proxy';
 const HEADERS = { 'x-api-key': 'JPxK9m2026TraderB0t!', 'Content-Type': 'application/json' };
 
@@ -27,9 +27,12 @@ const fmt = (n, decimals = 2) =>
 const fmtUSD = (n) =>
   n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const fmtBNB = (n) =>
+  n == null ? '—' : (n < 0 ? '-' : '') + Math.abs(Number(n)).toFixed(6) + ' BNB';
+
 const pct = (n) => n == null ? '—' : `${Number(n).toFixed(2)}%`;
 
-const clr = (n) => n == null ? '' : n >= 0 ? 'positive' : 'negative';
+const clr = (n) => n == null ? '' : Number(n) >= 0 ? 'positive' : 'negative';
 
 function Loader() {
   return (
@@ -44,7 +47,6 @@ function ErrBox({ msg }) {
   return <div className="error-state"><AlertTriangle size={14} style={{ marginRight: 6 }} />{msg}</div>;
 }
 
-// ─── Custom Tooltip ───────────────────────────────────────────────────────────
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
@@ -55,7 +57,7 @@ function CustomTooltip({ active, payload, label }) {
       <div style={{ color: '#7070a0', marginBottom: 4 }}>{label}</div>
       {payload.map((p) => (
         <div key={p.dataKey} style={{ color: p.color || '#00ff88' }}>
-          {p.name}: <strong>{typeof p.value === 'number' ? fmtUSD(p.value) : p.value}</strong>
+          {p.name}: <strong>{p.value}</strong>
         </div>
       ))}
     </div>
@@ -64,22 +66,28 @@ function CustomTooltip({ active, payload, label }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: OVERVIEW
+// API: { today: {sniper_bnb, sniper_trades, sniper_win_rate, grid_usdt, grid_trades},
+//        history_7d: [{date, sniper_bnb, grid_usdt, ibkr_usd}] }
 // ─────────────────────────────────────────────────────────────────────────────
-function OverviewTab({ pnl, ibkr, sniper, grid, funding }) {
+function OverviewTab({ pnl, ibkr, sniper, grid }) {
   if (!pnl) return <Loader />;
 
-  const todayPnl   = pnl.today_pnl   ?? pnl.pnl_today ?? 0;
-  const weekPnl    = pnl.week_pnl    ?? pnl.pnl_7d     ?? 0;
-  const totalTrades= pnl.total_trades ?? pnl.trades_today ?? '—';
-  const winRate    = pnl.win_rate     ?? sniper?.win_rate ?? null;
-  const history    = pnl.history      ?? pnl.daily       ?? [];
+  const todayBNB   = pnl.today?.sniper_bnb   ?? 0;
+  const todayUSDT  = pnl.today?.grid_usdt    ?? 0;
+  const totalTrades= (pnl.today?.sniper_trades ?? 0) + (pnl.today?.grid_trades ?? 0);
+  const winRate    = pnl.today?.sniper_win_rate ?? sniper?.win_rate ?? 0;
 
-  const chartData = history.map((d, i) => ({
-    day: d.date ?? d.day ?? `D-${history.length - i}`,
-    pnl: d.pnl  ?? d.value ?? 0,
+  const history   = pnl.history_7d ?? [];
+  const chartData = history.map((d) => ({
+    day: (d.date ?? '').slice(5),
+    sniper: Number(d.sniper_bnb ?? 0),
+    grid:   Number(d.grid_usdt  ?? 0),
   }));
 
-  const regime = String(ibkr?.regime?.regime ?? ibkr?.regime ?? ibkr?.market_regime ?? 'unknown');
+  const weekSniper = history.reduce((s, d) => s + (Number(d.sniper_bnb) || 0), 0);
+  const weekGrid   = history.reduce((s, d) => s + (Number(d.grid_usdt)  || 0), 0);
+
+  const regime = String(ibkr?.regime?.regime ?? ibkr?.regime ?? 'UNKNOWN');
   const regimeClass = regime.toLowerCase().includes('bull') ? 'bull'
     : regime.toLowerCase().includes('bear') ? 'bear'
     : regime.toLowerCase().includes('range') || regime.toLowerCase().includes('sideways') ? 'range'
@@ -87,96 +95,95 @@ function OverviewTab({ pnl, ibkr, sniper, grid, funding }) {
 
   return (
     <div>
-      {/* KPI row */}
       <div className="grid-4 section-gap">
         <div className="stat-tile">
-          <div className="stat-label">P&amp;L Today</div>
-          <div className={`stat-value ${todayPnl < 0 ? 'negative' : ''}`}>{fmtUSD(todayPnl)}</div>
-          <div className="stat-sub">USD net</div>
+          <div className="stat-label">Sniper P&amp;L Today</div>
+          <div className={`stat-value ${todayBNB < 0 ? 'negative' : ''}`} style={{ fontSize: 20 }}>
+            {fmtBNB(todayBNB)}
+          </div>
+          <div className="stat-sub">BSC net</div>
         </div>
         <div className="stat-tile">
-          <div className="stat-label">P&amp;L 7 Days</div>
-          <div className={`stat-value ${weekPnl < 0 ? 'negative' : ''}`}>{fmtUSD(weekPnl)}</div>
-          <div className="stat-sub">rolling week</div>
+          <div className="stat-label">Grid P&amp;L Today</div>
+          <div className={`stat-value ${todayUSDT < 0 ? 'negative' : ''}`} style={{ fontSize: 20 }}>
+            {fmtUSD(todayUSDT)}
+          </div>
+          <div className="stat-sub">USDT net</div>
         </div>
         <div className="stat-tile">
-          <div className="stat-label">Win Rate</div>
-          <div className="stat-value">{winRate != null ? pct(winRate * (winRate <= 1 ? 100 : 1)) : '—'}</div>
-          <div className="stat-sub">all strategies</div>
+          <div className="stat-label">Win Rate (Sniper)</div>
+          <div className="stat-value">{pct(winRate)}</div>
+          <div className="stat-sub">today</div>
         </div>
         <div className="stat-tile">
           <div className="stat-label">Total Trades</div>
           <div className="stat-value neutral">{totalTrades}</div>
-          <div className="stat-sub">today</div>
+          <div className="stat-sub">sniper + grid hoje</div>
         </div>
       </div>
 
       <div className="grid-2 section-gap">
-        {/* P&L chart */}
         <div className="card">
-          <div className="card-title"><TrendingUp size={14} />7-Day P&amp;L</div>
+          <div className="card-title"><TrendingUp size={14} />7-Day P&amp;L History</div>
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#00ff88" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#00ff88" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+              <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1a1a33" />
                 <XAxis dataKey="day" tick={{ fill: '#7070a0', fontSize: 10 }} />
-                <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} tickFormatter={(v) => `$${v}`} />
+                <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} />
                 <Tooltip content={<CustomTooltip />} />
-                <ReferenceLine y={0} stroke="#1a1a33" />
-                <Area type="monotone" dataKey="pnl" stroke="#00ff88" fill="url(#pnlGrad)" strokeWidth={2} name="P&L" />
-              </AreaChart>
+                <ReferenceLine y={0} stroke="#333360" />
+                <Bar dataKey="sniper" name="Sniper BNB" fill="#00ff88" radius={[3,3,0,0]} />
+                <Bar dataKey="grid"   name="Grid USDT"  fill="#4488ff" radius={[3,3,0,0]} />
+              </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="empty-state">No history data</div>
+            <div className="empty-state">Sem histórico</div>
           )}
         </div>
 
-        {/* Market regime + quick stats */}
         <div className="card">
-          <div className="card-title"><Activity size={14} />Market Regime</div>
-          <div style={{ marginBottom: 20 }}>
+          <div className="card-title"><Activity size={14} />Resumo Semanal</div>
+          <div style={{ marginBottom: 16 }}>
             <span className={`regime-pill regime-${regimeClass}`}>
               {regimeClass === 'bull' && <TrendingUp size={12} />}
               {regimeClass === 'bear' && <TrendingDown size={12} />}
-              {regime || 'Unknown'}
+              {regime}
             </span>
           </div>
-
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {ibkr?.vix != null && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+              <span className="dim mono">Sniper 7d</span>
+              <span className={`mono ${clr(weekSniper)}`}>{fmtBNB(weekSniper)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+              <span className="dim mono">Grid 7d</span>
+              <span className={`mono ${clr(weekGrid)}`}>{fmtUSD(weekGrid)}</span>
+            </div>
+            {ibkr?.regime?.vix != null && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                 <span className="dim mono">VIX</span>
-                <span className="mono" style={{ color: ibkr.vix > 25 ? 'var(--yellow)' : 'var(--text)' }}>{fmt(ibkr.vix)}</span>
+                <span className="mono" style={{ color: ibkr.regime.vix > 25 ? 'var(--yellow)' : 'var(--text)' }}>
+                  {fmt(ibkr.regime.vix)}
+                </span>
               </div>
             )}
-            {ibkr?.spy_return != null && (
+            {ibkr?.regime?.spy != null && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">SPY Return</span>
-                <span className={`mono ${clr(ibkr.spy_return)}`}>{pct(ibkr.spy_return)}</span>
+                <span className="dim mono">SPY</span>
+                <span className="mono">${fmt(ibkr.regime.spy)}</span>
               </div>
             )}
-            {sniper?.win_rate != null && (
+            {ibkr?.signals?.signals_today != null && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">Sniper Win Rate</span>
-                <span className="mono positive">{pct(sniper.win_rate * (sniper.win_rate <= 1 ? 100 : 1))}</span>
+                <span className="dim mono">IBKR Signals Hoje</span>
+                <span className="mono positive">{ibkr.signals.signals_today}</span>
               </div>
             )}
             {grid?.active_bots != null && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">Grid Bots Active</span>
+                <span className="dim mono">Grid Bots Activos</span>
                 <span className="mono positive">{grid.active_bots}</span>
-              </div>
-            )}
-            {funding?.positions != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">Funding Positions</span>
-                <span className="mono">{funding.positions?.length ?? 0}</span>
               </div>
             )}
           </div>
@@ -188,31 +195,28 @@ function OverviewTab({ pnl, ibkr, sniper, grid, funding }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: IBKR
+// API: { account, mode, regime: {regime, spy, vix}, signals: {signals_today, orders_placed, recent_signals: [{strategy, ticker, direction, price, stop_loss, take_profit, score, timestamp}]} }
 // ─────────────────────────────────────────────────────────────────────────────
 function IBKRTab({ data }) {
   if (!data) return <Loader />;
 
-  const signals = data.signals ?? data.ibkr_signals ?? [];
-  const regime  = data.regime  ?? data.market_regime ?? 'Unknown';
+  const regime   = String(data.regime?.regime ?? 'UNKNOWN');
+  const vix      = data.regime?.vix  ?? null;
+  const spy      = data.regime?.spy  ?? null;
+  const signals  = data.signals?.recent_signals ?? [];
+  const sigCount = data.signals?.signals_today  ?? signals.length;
+  const orders   = data.signals?.orders_placed  ?? 0;
+
   const regimeClass = regime.toLowerCase().includes('bull') ? 'bull'
     : regime.toLowerCase().includes('bear') ? 'bear'
-    : regime.toLowerCase().includes('range') || regime.toLowerCase().includes('sideways') ? 'range'
+    : regime.toLowerCase().includes('range') ? 'range'
     : 'unknown';
-
-  const metrics = [
-    { label: 'VIX',        val: data.vix,        fmt: (v) => fmt(v) },
-    { label: 'SPY',        val: data.spy,        fmt: (v) => `$${fmt(v)}` },
-    { label: 'SPY Return', val: data.spy_return, fmt: (v) => pct(v), cls: clr(data.spy_return) },
-    { label: 'QQQ',        val: data.qqq,        fmt: (v) => `$${fmt(v)}` },
-    { label: 'IWM',        val: data.iwm,        fmt: (v) => `$${fmt(v)}` },
-    { label: 'Beta',       val: data.beta,       fmt: (v) => fmt(v) },
-  ].filter(m => m.val != null);
 
   return (
     <div>
       <div className="grid-4 section-gap">
-        <div className="stat-tile" style={{ gridColumn: 'span 1' }}>
-          <div className="stat-label">Market Regime</div>
+        <div className="stat-tile">
+          <div className="stat-label">Regime</div>
           <div style={{ marginTop: 10 }}>
             <span className={`regime-pill regime-${regimeClass}`}>
               {regimeClass === 'bull' && <TrendingUp size={12} />}
@@ -221,48 +225,59 @@ function IBKRTab({ data }) {
             </span>
           </div>
         </div>
-        {metrics.map((m) => (
-          <div key={m.label} className="stat-tile">
-            <div className="stat-label">{m.label}</div>
-            <div className={`stat-value ${m.cls ?? ''}`} style={{ fontSize: 20 }}>{m.fmt(m.val)}</div>
+        <div className="stat-tile">
+          <div className="stat-label">VIX</div>
+          <div className="stat-value" style={{ fontSize: 22, color: vix > 25 ? 'var(--yellow)' : 'var(--green)' }}>
+            {vix != null ? fmt(vix) : '—'}
           </div>
-        ))}
+        </div>
+        <div className="stat-tile">
+          <div className="stat-label">SPY</div>
+          <div className="stat-value neutral" style={{ fontSize: 22 }}>
+            {spy != null ? `$${fmt(spy)}` : '—'}
+          </div>
+        </div>
+        <div className="stat-tile">
+          <div className="stat-label">Sinais Hoje</div>
+          <div className="stat-value neutral">{sigCount}</div>
+          <div className="stat-sub">{orders} ordens executadas</div>
+        </div>
       </div>
 
       <div className="card">
-        <div className="card-title"><Zap size={14} />IBKR Signals</div>
+        <div className="card-title"><Zap size={14} />Sinais Recentes — {data.account} ({data.mode})</div>
         {signals.length === 0 ? (
-          <div className="empty-state">No signals at the moment</div>
+          <div className="empty-state">Sem sinais recentes</div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Symbol</th>
-                  <th>Action</th>
-                  <th>Price</th>
+                  <th>Ticker</th>
+                  <th>Direção</th>
+                  <th>Preço</th>
+                  <th>Stop Loss</th>
+                  <th>Take Profit</th>
                   <th>Score</th>
+                  <th>Estratégia</th>
                   <th>Timestamp</th>
-                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {signals.map((s, i) => (
                   <tr key={i}>
-                    <td style={{ fontWeight: 700, color: 'var(--text)' }}>{s.symbol ?? s.ticker ?? '—'}</td>
+                    <td style={{ fontWeight: 700 }}>{s.ticker ?? '—'}</td>
                     <td>
-                      <span className={`badge ${(s.action ?? s.side ?? '').toLowerCase() === 'buy' ? 'badge-green' : 'badge-red'}`}>
-                        {s.action ?? s.side ?? '—'}
+                      <span className={`badge ${(s.direction ?? '').toLowerCase() === 'long' ? 'badge-green' : 'badge-red'}`}>
+                        {s.direction ?? '—'}
                       </span>
                     </td>
-                    <td>{s.price != null ? `$${fmt(s.price)}` : '—'}</td>
-                    <td style={{ color: 'var(--blue)' }}>{s.score != null ? fmt(s.score, 3) : '—'}</td>
-                    <td className="dim">{s.timestamp ?? s.time ?? '—'}</td>
-                    <td>
-                      <span className={`badge ${s.status === 'filled' ? 'badge-green' : s.status === 'pending' ? 'badge-yellow' : 'badge-blue'}`}>
-                        {s.status ?? 'new'}
-                      </span>
-                    </td>
+                    <td className="mono">{s.price   != null ? `$${fmt(s.price,   2)}` : '—'}</td>
+                    <td className="mono negative">{s.stop_loss   != null ? `$${fmt(s.stop_loss,   2)}` : '—'}</td>
+                    <td className="mono positive">{s.take_profit != null ? `$${fmt(s.take_profit, 2)}` : '—'}</td>
+                    <td style={{ color: 'var(--blue)' }}>{s.score ?? '—'}</td>
+                    <td className="dim">{s.strategy ?? '—'}</td>
+                    <td className="dim" style={{ fontSize: 11 }}>{s.timestamp ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -276,19 +291,25 @@ function IBKRTab({ data }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: SNIPER
+// API: { total_pnl_bnb, wins, losses, win_rate, total_trades,
+//        recent_trades: [{type, side, token, pnl, timestamp}],
+//        pnl_history: [{date, pnl_bnb, trades, win_rate}] }
 // ─────────────────────────────────────────────────────────────────────────────
 function SniperTab({ data }) {
   if (!data) return <Loader />;
 
-  const trades   = data.trades   ?? data.history  ?? [];
-  const winRate  = data.win_rate ?? null;
-  const totalPnl = data.total_pnl ?? data.pnl ?? null;
-  const totalTrades = data.total_trades ?? trades.length;
-  const avgPnl   = data.avg_pnl  ?? null;
+  const trades    = data.recent_trades   ?? [];
+  const history   = data.pnl_history     ?? [];
+  const totalBNB  = data.total_pnl_bnb   ?? 0;
+  const totalUSDT = data.total_pnl_usdt  ?? 0;
+  const winRate   = data.win_rate        ?? 0;
+  const wins      = data.wins            ?? 0;
+  const losses    = data.losses          ?? 0;
 
-  const chartData = trades.slice(-20).map((t, i) => ({
-    idx: i + 1,
-    pnl: t.pnl ?? t.profit ?? 0,
+  const chartData = history.map((d) => ({
+    day:  (d.date ?? '').slice(5),
+    bnb:  Number(d.pnl_bnb  ?? 0),
+    usdt: Number(d.pnl_usdt ?? 0),
   }));
 
   return (
@@ -296,79 +317,78 @@ function SniperTab({ data }) {
       <div className="grid-4 section-gap">
         <div className="stat-tile">
           <div className="stat-label">Win Rate</div>
-          <div className="stat-value">{winRate != null ? pct(winRate * (winRate <= 1 ? 100 : 1)) : '—'}</div>
+          <div className="stat-value">{pct(winRate)}</div>
+          <div className="stat-sub">{wins}W / {losses}L</div>
         </div>
         <div className="stat-tile">
-          <div className="stat-label">Total P&amp;L</div>
-          <div className={`stat-value ${totalPnl != null && totalPnl < 0 ? 'negative' : ''}`}>{fmtUSD(totalPnl)}</div>
+          <div className="stat-label">P&amp;L BNB (7d)</div>
+          <div className={`stat-value ${totalBNB < 0 ? 'negative' : ''}`} style={{ fontSize: 18 }}>
+            {fmtBNB(totalBNB)}
+          </div>
+        </div>
+        <div className="stat-tile">
+          <div className="stat-label">P&amp;L USDT (7d)</div>
+          <div className={`stat-value ${totalUSDT < 0 ? 'negative' : ''}`} style={{ fontSize: 18 }}>
+            {fmtUSD(totalUSDT)}
+          </div>
         </div>
         <div className="stat-tile">
           <div className="stat-label">Total Trades</div>
-          <div className="stat-value neutral">{totalTrades}</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Avg P&amp;L / Trade</div>
-          <div className={`stat-value ${avgPnl != null && avgPnl < 0 ? 'negative' : ''}`}>{avgPnl != null ? fmtUSD(avgPnl) : '—'}</div>
+          <div className="stat-value neutral">{data.total_trades ?? 0}</div>
         </div>
       </div>
 
       {chartData.length > 0 && (
         <div className="card section-gap">
-          <div className="card-title"><BarChart2 size={14} />Recent Trades P&amp;L</div>
+          <div className="card-title"><BarChart2 size={14} />P&amp;L 7 dias</div>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1a1a33" />
-              <XAxis dataKey="idx" tick={{ fill: '#7070a0', fontSize: 10 }} />
-              <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} tickFormatter={(v) => `$${v}`} />
+              <XAxis dataKey="day" tick={{ fill: '#7070a0', fontSize: 10 }} />
+              <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} />
               <Tooltip content={<CustomTooltip />} />
-              <ReferenceLine y={0} stroke="#1a1a33" />
-              <Bar dataKey="pnl" name="P&L"
-                fill="#00ff88"
-                radius={[3, 3, 0, 0]}
-              />
+              <ReferenceLine y={0} stroke="#333360" />
+              <Bar dataKey="bnb"  name="BNB"  fill="#00ff88" radius={[3,3,0,0]} />
+              <Bar dataKey="usdt" name="USDT" fill="#4488ff" radius={[3,3,0,0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       )}
 
       <div className="card">
-        <div className="card-title"><Target size={14} />Trade History — BSC Sniper</div>
+        <div className="card-title"><Target size={14} />Trades Recentes — BSC Sniper</div>
         {trades.length === 0 ? (
-          <div className="empty-state">No trades yet</div>
+          <div className="empty-state">Sem trades recentes</div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Token</th>
-                  <th>Side</th>
-                  <th>Entry</th>
-                  <th>Exit</th>
+                  <th>Resultado</th>
                   <th>P&amp;L</th>
-                  <th>Status</th>
-                  <th>Time</th>
+                  <th>Moeda</th>
+                  <th>Timestamp</th>
                 </tr>
               </thead>
               <tbody>
-                {[...trades].reverse().slice(0, 50).map((t, i) => (
+                {[...trades].reverse().map((t, i) => (
                   <tr key={i}>
-                    <td style={{ fontWeight: 700 }}>{t.token ?? t.symbol ?? t.pair ?? '—'}</td>
+                    <td style={{ fontWeight: 700, fontSize: 11 }}>{t.token ?? '—'}</td>
                     <td>
-                      <span className={`badge ${(t.side ?? t.action ?? '').toLowerCase() === 'buy' ? 'badge-green' : 'badge-red'}`}>
-                        {t.side ?? t.action ?? '—'}
+                      <span className={`badge ${t.type === 'TAKE_PROFIT' ? 'badge-green' : 'badge-red'}`}>
+                        {t.type === 'TAKE_PROFIT' ? 'TP' : t.type === 'STOP_LOSS' ? 'SL' : t.type ?? '—'}
                       </span>
                     </td>
-                    <td className="mono">{t.entry  != null ? `$${fmt(t.entry,  4)}` : '—'}</td>
-                    <td className="mono">{t.exit   != null ? `$${fmt(t.exit,   4)}` : '—'}</td>
-                    <td className={`mono ${clr(t.pnl ?? t.profit)}`}>
-                      {fmtUSD(t.pnl ?? t.profit)}
+                    <td className={`mono ${clr(t.pnl)}`}>
+                      {t.pnl != null ? (t.pnl >= 0 ? '+' : '') + Number(t.pnl).toFixed(6) : '—'}
                     </td>
                     <td>
-                      <span className={`badge ${t.status === 'closed' || t.status === 'filled' ? 'badge-green' : t.status === 'open' ? 'badge-blue' : 'badge-yellow'}`}>
-                        {t.status ?? '—'}
+                      <span className={`badge ${t.currency === 'WBNB' ? 'badge-yellow' : 'badge-blue'}`}>
+                        {t.currency ?? '—'}
                       </span>
                     </td>
-                    <td className="dim">{t.timestamp ?? t.time ?? '—'}</td>
+                    <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -382,23 +402,27 @@ function SniperTab({ data }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: GRID
+// API: { total_pnl, total_trades, recent_trades: [{side, pair, price, pnl, timestamp}],
+//        active_bots, active_grids: [{bot, pair, price, range, levels, lower, upper, status}] }
 // ─────────────────────────────────────────────────────────────────────────────
 function GridTab({ data }) {
   if (!data) return <Loader />;
 
-  const bots   = data.bots   ?? data.active_bots_list  ?? data.grids  ?? [];
-  const trades = data.trades ?? data.recent_trades      ?? [];
+  const bots   = data.active_grids ?? [];
+  const trades = data.recent_trades ?? [];
 
   return (
     <div>
       <div className="grid-3 section-gap">
         <div className="stat-tile">
-          <div className="stat-label">Active Bots</div>
+          <div className="stat-label">Bots Activos</div>
           <div className="stat-value neutral">{data.active_bots ?? bots.length}</div>
         </div>
         <div className="stat-tile">
           <div className="stat-label">Total P&amp;L</div>
-          <div className={`stat-value ${(data.total_pnl ?? 0) < 0 ? 'negative' : ''}`}>{fmtUSD(data.total_pnl ?? data.pnl)}</div>
+          <div className={`stat-value ${(data.total_pnl ?? 0) < 0 ? 'negative' : ''}`}>
+            {fmtUSD(data.total_pnl)}
+          </div>
         </div>
         <div className="stat-tile">
           <div className="stat-label">Grid Trades</div>
@@ -407,37 +431,35 @@ function GridTab({ data }) {
       </div>
 
       <div className="card section-gap">
-        <div className="card-title"><Grid size={14} />Active Grid Bots</div>
+        <div className="card-title"><Grid size={14} />Grid Bots Activos</div>
         {bots.length === 0 ? (
-          <div className="empty-state">No active bots</div>
+          <div className="empty-state">Sem bots activos detectados nos logs</div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Pair</th>
+                  <th>Bot</th>
+                  <th>Par</th>
+                  <th>Preço</th>
                   <th>Lower</th>
                   <th>Upper</th>
-                  <th>Grids</th>
-                  <th>Invested</th>
-                  <th>P&amp;L</th>
-                  <th>Status</th>
+                  <th>Range</th>
+                  <th>Níveis</th>
+                  <th>Estado</th>
                 </tr>
               </thead>
               <tbody>
                 {bots.map((b, i) => (
                   <tr key={i}>
-                    <td style={{ fontWeight: 700 }}>{b.pair ?? b.symbol ?? '—'}</td>
-                    <td className="mono dim">{b.lower  != null ? `$${fmt(b.lower,  4)}` : '—'}</td>
-                    <td className="mono dim">{b.upper  != null ? `$${fmt(b.upper,  4)}` : '—'}</td>
-                    <td className="mono">{b.grids ?? b.grid_count ?? '—'}</td>
-                    <td className="mono">{b.invested != null ? fmtUSD(b.invested) : '—'}</td>
-                    <td className={`mono ${clr(b.pnl ?? b.profit)}`}>{fmtUSD(b.pnl ?? b.profit)}</td>
-                    <td>
-                      <span className={`badge ${b.status === 'running' || b.status === 'active' ? 'badge-green' : 'badge-yellow'}`}>
-                        {b.status ?? 'active'}
-                      </span>
-                    </td>
+                    <td className="dim" style={{ fontSize: 11 }}>{b.bot ?? '—'}</td>
+                    <td style={{ fontWeight: 700 }}>{b.pair ?? '—'}</td>
+                    <td className="mono">{b.price != null ? fmt(b.price, 4) : '—'}</td>
+                    <td className="mono dim">{b.lower != null ? fmt(b.lower, 4) : '—'}</td>
+                    <td className="mono dim">{b.upper != null ? fmt(b.upper, 4) : '—'}</td>
+                    <td className="mono">{b.range ?? '—'}</td>
+                    <td className="mono">{b.levels ?? '—'}</td>
+                    <td><span className="badge badge-yellow">dry_run</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -448,32 +470,30 @@ function GridTab({ data }) {
 
       {trades.length > 0 && (
         <div className="card">
-          <div className="card-title"><Activity size={14} />Recent Grid Trades</div>
+          <div className="card-title"><Activity size={14} />Trades Recentes</div>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Pair</th>
+                  <th>Par</th>
                   <th>Side</th>
-                  <th>Price</th>
-                  <th>Qty</th>
+                  <th>Preço</th>
                   <th>P&amp;L</th>
-                  <th>Time</th>
+                  <th>Timestamp</th>
                 </tr>
               </thead>
               <tbody>
                 {trades.slice(0, 30).map((t, i) => (
                   <tr key={i}>
-                    <td style={{ fontWeight: 700 }}>{t.pair ?? t.symbol ?? '—'}</td>
+                    <td style={{ fontWeight: 700 }}>{t.pair ?? '—'}</td>
                     <td>
                       <span className={`badge ${(t.side ?? '').toLowerCase() === 'buy' ? 'badge-green' : 'badge-red'}`}>
                         {t.side ?? '—'}
                       </span>
                     </td>
-                    <td className="mono">{t.price != null ? `$${fmt(t.price, 4)}` : '—'}</td>
-                    <td className="mono">{t.qty   != null ? fmt(t.qty, 4) : '—'}</td>
-                    <td className={`mono ${clr(t.pnl)}`}>{fmtUSD(t.pnl)}</td>
-                    <td className="dim">{t.timestamp ?? t.time ?? '—'}</td>
+                    <td className="mono">{t.price != null ? fmt(t.price, 4) : '—'}</td>
+                    <td className={`mono ${clr(t.pnl)}`}>{t.pnl != null ? fmtUSD(t.pnl) : 'dry_run'}</td>
+                    <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -487,35 +507,32 @@ function GridTab({ data }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: FUNDING
+// API: { active_positions, positions: [{symbol, side, size, entry, mark, funding_rate, funding_earned, unrealized_pnl}],
+//        total_earned_usdt }
 // ─────────────────────────────────────────────────────────────────────────────
 function FundingTab({ data }) {
   if (!data) return <Loader />;
 
-  const positions = data.positions ?? data.funding_positions ?? [];
-  const totalPnl  = data.total_pnl  ?? data.pnl ?? null;
-  const totalFund = data.total_funding ?? data.earned ?? null;
+  const positions   = data.positions         ?? [];
+  const totalEarned = data.total_earned_usdt ?? null;
 
   return (
     <div>
-      <div className="grid-3 section-gap">
+      <div className="grid-2 section-gap">
         <div className="stat-tile">
-          <div className="stat-label">Open Positions</div>
-          <div className="stat-value neutral">{positions.length}</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Total P&amp;L</div>
-          <div className={`stat-value ${totalPnl != null && totalPnl < 0 ? 'negative' : ''}`}>{fmtUSD(totalPnl)}</div>
+          <div className="stat-label">Posições Abertas</div>
+          <div className="stat-value neutral">{data.active_positions ?? positions.length}</div>
         </div>
         <div className="stat-tile">
           <div className="stat-label">Funding Earned</div>
-          <div className="stat-value">{fmtUSD(totalFund)}</div>
+          <div className="stat-value">{fmtUSD(totalEarned)}</div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-title"><DollarSign size={14} />Funding Rate Positions</div>
         {positions.length === 0 ? (
-          <div className="empty-state">No open positions</div>
+          <div className="empty-state">Sem posições abertas detectadas nos logs</div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -523,51 +540,29 @@ function FundingTab({ data }) {
                 <tr>
                   <th>Symbol</th>
                   <th>Side</th>
-                  <th>Size</th>
-                  <th>Entry</th>
-                  <th>Mark</th>
-                  <th>Funding Rate</th>
-                  <th>Funding 8h</th>
+                  <th>Size (USDT/ordem)</th>
+                  <th>Lower</th>
+                  <th>Upper</th>
+                  <th>Funding Earned</th>
                   <th>Unr. P&amp;L</th>
                 </tr>
               </thead>
               <tbody>
-                {positions.map((p, i) => {
-                  const rate = p.funding_rate ?? p.rate ?? 0;
-                  const pct8 = rate * 100;
-                  const barPct = Math.min(Math.abs(pct8) * 10, 50);
-                  return (
-                    <tr key={i}>
-                      <td style={{ fontWeight: 700 }}>{p.symbol ?? p.pair ?? '—'}</td>
-                      <td>
-                        <span className={`badge ${(p.side ?? '').toLowerCase() === 'long' ? 'badge-green' : 'badge-red'}`}>
-                          {p.side ?? '—'}
-                        </span>
-                      </td>
-                      <td className="mono">{p.size  != null ? fmt(p.size) : '—'}</td>
-                      <td className="mono">{p.entry != null ? `$${fmt(p.entry)}` : '—'}</td>
-                      <td className="mono">{p.mark  != null ? `$${fmt(p.mark)}` : '—'}</td>
-                      <td>
-                        <div className="funding-bar-wrap">
-                          <span className={`mono ${rate >= 0 ? 'positive' : 'negative'}`} style={{ minWidth: 60 }}>
-                            {pct(pct8)}
-                          </span>
-                          <div className="funding-bar" style={{ width: 60 }}>
-                            {rate >= 0
-                              ? <div className="funding-fill-pos" style={{ width: `${barPct}%` }} />
-                              : <div className="funding-fill-neg" style={{ width: `${barPct}%` }} />}
-                          </div>
-                        </div>
-                      </td>
-                      <td className={`mono ${clr(p.funding_earned ?? p.funding_pnl)}`}>
-                        {fmtUSD(p.funding_earned ?? p.funding_pnl)}
-                      </td>
-                      <td className={`mono ${clr(p.unrealized_pnl ?? p.unr_pnl)}`}>
-                        {fmtUSD(p.unrealized_pnl ?? p.unr_pnl)}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {positions.map((p, i) => (
+                  <tr key={i}>
+                    <td style={{ fontWeight: 700 }}>{p.symbol ?? '—'}</td>
+                    <td>
+                      <span className={`badge ${(p.side ?? '').toLowerCase() === 'long' ? 'badge-green' : 'badge-red'}`}>
+                        {p.side ?? '—'}
+                      </span>
+                    </td>
+                    <td className="mono">{p.size  != null ? fmtUSD(p.size)  : '—'}</td>
+                    <td className="mono dim">{p.entry != null ? fmt(p.entry, 4) : '—'}</td>
+                    <td className="mono dim">{p.mark  != null ? fmt(p.mark,  4) : '—'}</td>
+                    <td className={`mono ${clr(p.funding_earned)}`}>{fmtUSD(p.funding_earned)}</td>
+                    <td className={`mono ${clr(p.unrealized_pnl)}`}>{fmtUSD(p.unrealized_pnl)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -579,18 +574,21 @@ function FundingTab({ data }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: LOGS
+// API: { service, count, logs: [{raw: string, level: INFO|WARN|ERROR|DEBUG}] }
 // ─────────────────────────────────────────────────────────────────────────────
-const LOG_SERVICES = ['ibkr', 'sniper', 'grid', 'funding', 'system', 'api'];
-
-function parseLevel(line) {
-  if (/ERROR|CRITICAL|FATAL/i.test(line)) return 'ERROR';
-  if (/WARN/i.test(line))  return 'WARN';
-  if (/DEBUG/i.test(line)) return 'DEBUG';
-  return 'INFO';
-}
+const LOG_SERVICES = [
+  { label: 'autonomous-trader', value: 'autonomous-trader' },
+  { label: 'crypto_bsc',        value: 'crypto_bsc' },
+  { label: 'ibc-gateway',       value: 'ibc-gateway' },
+  { label: 'tgbot-ibkr',        value: 'tgbot-ibkr' },
+  { label: 'tgbot-sniper',      value: 'tgbot-sniper' },
+  { label: 'tgbot-grid',        value: 'tgbot-grid' },
+  { label: 'tgbot-funding',     value: 'tgbot-funding' },
+  { label: 'hermes-gateway',    value: 'hermes-gateway' },
+];
 
 function LogsTab() {
-  const [service, setService] = useState('ibkr');
+  const [service, setService] = useState('autonomous-trader');
   const [lines, setLines]     = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
@@ -601,8 +599,9 @@ function LogsTab() {
     setError(null);
     try {
       const data = await apiFetch(`/api/logs/${service}`);
-      const raw = data.logs ?? data.lines ?? data.content ?? (typeof data === 'string' ? data.split('\n') : []);
-      setLines(Array.isArray(raw) ? raw : raw.split('\n'));
+      // logs is array of {raw, level} objects
+      const raw = (data.logs ?? []).map((l) => (typeof l === 'object' ? l.raw : l) ?? '');
+      setLines(raw);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -616,89 +615,100 @@ function LogsTab() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [lines]);
 
-  return (
-    <div>
-      <div className="card">
-        <div className="card-title" style={{ justifyContent: 'space-between' }}>
-          <span><FileText size={14} />Log Viewer</span>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <select className="log-select" value={service} onChange={(e) => setService(e.target.value)}>
-              {LOG_SERVICES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            <button className={`refresh-btn ${loading ? 'spinning' : ''}`} onClick={fetchLogs}>
-              <RefreshCw size={12} />Refresh
-            </button>
-          </div>
-        </div>
+  function parseLevel(line) {
+    if (/ERROR|CRITICAL|FATAL/i.test(line)) return 'ERROR';
+    if (/WARN/i.test(line))  return 'WARN';
+    if (/DEBUG/i.test(line)) return 'DEBUG';
+    return 'INFO';
+  }
 
-        {error ? <ErrBox msg={error} /> : (
-          <div className="log-console">
-            {lines.length === 0 && !loading && <span className="dim">No log lines</span>}
-            {lines.map((line, i) => {
-              const level = parseLevel(line);
-              const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})/);
-              const ts = tsMatch ? tsMatch[1] : null;
-              const rest = ts ? line.slice(ts.length).trim() : line;
-              return (
-                <span key={i} className="log-line">
-                  {ts && <span className="log-ts">{ts}</span>}
-                  <span className={`log-${level}`}>[{level}]</span>{' '}
-                  <span className="log-text">{rest}</span>{'\n'}
-                </span>
-              );
-            })}
-            <div ref={bottomRef} />
-          </div>
-        )}
+  return (
+    <div className="card">
+      <div className="card-title" style={{ justifyContent: 'space-between' }}>
+        <span><FileText size={14} />Log Viewer</span>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <select className="log-select" value={service} onChange={(e) => setService(e.target.value)}>
+            {LOG_SERVICES.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+          <button className={`refresh-btn ${loading ? 'spinning' : ''}`} onClick={fetchLogs}>
+            <RefreshCw size={12} />Refresh
+          </button>
+        </div>
       </div>
+
+      {error ? <ErrBox msg={error} /> : (
+        <div className="log-console">
+          {lines.length === 0 && !loading && <span className="dim">Sem logs</span>}
+          {lines.map((line, i) => {
+            const level = parseLevel(line);
+            const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\s]*)/);
+            const ts   = tsMatch ? tsMatch[1] : null;
+            const rest = ts ? line.slice(ts.length).trim() : line;
+            return (
+              <span key={i} className="log-line">
+                {ts && <span className="log-ts">{ts}</span>}
+                <span className={`log-${level}`}>[{level}]</span>{' '}
+                <span className="log-text">{rest}</span>{'\n'}
+              </span>
+            );
+          })}
+          <div ref={bottomRef} />
+        </div>
+      )}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: SYSTEM
+// API: { services: [{service, status, active, uptime_since}],
+//        cpu_percent, load_avg, memory_used_pct, disk_used_pct (float),
+//        disk_size, disk_used }
 // ─────────────────────────────────────────────────────────────────────────────
 function SystemTab({ data }) {
   if (!data) return <Loader />;
 
-  const cpu    = data.cpu    ?? data.cpu_percent    ?? null;
-  const ram    = data.ram    ?? data.memory_percent ?? data.ram_percent ?? null;
-  const disk   = data.disk   ?? data.disk_percent   ?? null;
-  const uptime = data.uptime ?? null;
-
-  const services = data.services ?? data.service_status ?? {};
+  const cpu    = data.cpu_percent     ?? null;
+  const ram    = data.memory_used_pct ?? null;
+  const disk   = typeof data.disk_used_pct === 'string'
+    ? parseFloat(data.disk_used_pct)
+    : data.disk_used_pct ?? null;
 
   const gauges = [
-    { label: 'CPU',  value: cpu,  unit: '%' },
-    { label: 'RAM',  value: ram,  unit: '%' },
-    { label: 'Disk', value: disk, unit: '%' },
+    { label: 'CPU',  icon: <Cpu size={14} />,         value: cpu,  extra: null },
+    { label: 'RAM',  icon: <MemoryStick size={14} />,  value: ram,  extra: null },
+    { label: 'Disk', icon: <HardDrive size={14} />,    value: disk, extra: `${data.disk_used ?? '?'} / ${data.disk_size ?? '?'}` },
   ].filter((g) => g.value != null);
 
+  function gaugeColor(v) {
+    if (v >= 90) return 'var(--red)';
+    if (v >= 70) return 'var(--yellow)';
+    return 'var(--green)';
+  }
   function gaugeClass(v) {
     if (v >= 90) return 'danger';
     if (v >= 70) return 'warn';
     return '';
   }
 
-  const serviceList = Object.entries(services);
+  // services is always an array from the API
+  const serviceList = Array.isArray(data.services)
+    ? data.services
+    : Object.entries(data.services ?? {}).map(([k, v]) => ({ service: k, status: v, active: v === 'active' || v === true }));
 
   return (
     <div>
       <div className="grid-3 section-gap">
         {gauges.map((g) => (
           <div key={g.label} className="card">
-            <div className="card-title">
-              {g.label === 'CPU'  && <Cpu size={14} />}
-              {g.label === 'RAM'  && <MemoryStick size={14} />}
-              {g.label === 'Disk' && <HardDrive size={14} />}
-              {g.label}
-            </div>
+            <div className="card-title">{g.icon}{g.label}</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-              <span className="mono" style={{ fontSize: 28, fontWeight: 700, color: g.value >= 90 ? 'var(--red)' : g.value >= 70 ? 'var(--yellow)' : 'var(--green)' }}>
-                {fmt(g.value, 1)}{g.unit}
+              <span className="mono" style={{ fontSize: 28, fontWeight: 700, color: gaugeColor(g.value) }}>
+                {fmt(g.value, 1)}%
               </span>
+              {g.extra && <span className="dim mono" style={{ fontSize: 11 }}>{g.extra}</span>}
             </div>
             <div className="progress-bar">
               <div className={`progress-fill ${gaugeClass(g.value)}`} style={{ width: `${Math.min(g.value, 100)}%` }} />
@@ -707,51 +717,49 @@ function SystemTab({ data }) {
         ))}
       </div>
 
-      {uptime && (
-        <div className="card section-gap" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Clock size={14} style={{ color: 'var(--text-dim)' }} />
-          <span className="dim" style={{ fontSize: 12 }}>Uptime:</span>
-          <span className="mono" style={{ fontSize: 13 }}>{uptime}</span>
+      {data.load_avg && (
+        <div className="card section-gap">
+          <div className="card-title"><Activity size={14} />Load Average</div>
+          <div style={{ display: 'flex', gap: 32 }}>
+            {(Array.isArray(data.load_avg) ? data.load_avg : [data.load_avg]).map((v, i) => (
+              <div key={i}>
+                <div className="dim mono" style={{ fontSize: 10 }}>{['1m', '5m', '15m'][i] ?? `${i}`}</div>
+                <div className="mono" style={{ fontSize: 22, color: 'var(--green)' }}>{fmt(Number(v), 2)}</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       <div className="card">
         <div className="card-title"><Server size={14} />Services</div>
         {serviceList.length === 0 ? (
-          <div className="empty-state">No service data</div>
+          <div className="empty-state">Sem dados de serviços</div>
         ) : (
-          serviceList.map(([name, status]) => {
-            const isUp = (status === true || status === 'running' || status === 'up' || status === 'active' || status === 'ok');
+          serviceList.map((svc) => {
+            const name   = svc.service ?? svc.name ?? '?';
+            const isUp   = svc.active ?? (svc.status === 'active' || svc.status === 'running');
+            const status = svc.status ?? (isUp ? 'active' : 'down');
+            const since  = svc.uptime_since ?? '';
             return (
               <div key={name} className="service-item">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   {isUp
                     ? <CheckCircle size={14} style={{ color: 'var(--green)' }} />
-                    : <XCircle    size={14} style={{ color: 'var(--red)'   }} />}
-                  <span className="service-name">{name}</span>
+                    : <XCircle    size={14} style={{ color: status === 'failed' ? 'var(--red)' : 'var(--yellow)' }} />}
+                  <div>
+                    <div className="service-name">{name}</div>
+                    {since && <div className="dim mono" style={{ fontSize: 10 }}>{since}</div>}
+                  </div>
                 </div>
-                <span className={`badge ${isUp ? 'badge-green' : 'badge-red'}`}>
-                  {typeof status === 'string' ? status : isUp ? 'running' : 'down'}
+                <span className={`badge ${isUp ? 'badge-green' : status === 'failed' ? 'badge-red' : 'badge-yellow'}`}>
+                  {status}
                 </span>
               </div>
             );
           })
         )}
       </div>
-
-      {data.load_avg != null && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <div className="card-title"><Activity size={14} />Load Average</div>
-          <div style={{ display: 'flex', gap: 32 }}>
-            {(Array.isArray(data.load_avg) ? data.load_avg : [data.load_avg]).map((v, i) => (
-              <div key={i}>
-                <div className="dim mono" style={{ fontSize: 10 }}>{['1m', '5m', '15m'][i] ?? `${i}`}</div>
-                <div className="mono" style={{ fontSize: 20, color: 'var(--green)' }}>{fmt(v, 2)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -760,13 +768,13 @@ function SystemTab({ data }) {
 // ROOT APP
 // ─────────────────────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'overview', label: 'Overview',  icon: BarChart2   },
-  { id: 'ibkr',     label: 'IBKR',      icon: TrendingUp  },
-  { id: 'sniper',   label: 'Sniper',    icon: Target      },
-  { id: 'grid',     label: 'Grid',      icon: Grid        },
-  { id: 'funding',  label: 'Funding',   icon: DollarSign  },
-  { id: 'logs',     label: 'Logs',      icon: FileText    },
-  { id: 'system',   label: 'System',    icon: Server      },
+  { id: 'overview', label: 'Overview',  icon: BarChart2  },
+  { id: 'ibkr',     label: 'IBKR',      icon: TrendingUp },
+  { id: 'sniper',   label: 'Sniper',    icon: Target     },
+  { id: 'grid',     label: 'Grid',      icon: Grid       },
+  { id: 'funding',  label: 'Funding',   icon: DollarSign },
+  { id: 'logs',     label: 'Logs',      icon: FileText   },
+  { id: 'system',   label: 'System',    icon: Server     },
 ];
 
 export default function App() {
@@ -774,6 +782,7 @@ export default function App() {
   const [loading, setLoading]     = useState(false);
   const [online, setOnline]       = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [errors, setErrors]       = useState({});
 
   const [pnl,     setPnl]     = useState(null);
   const [ibkr,    setIbkr]    = useState(null);
@@ -784,28 +793,25 @@ export default function App() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    try {
-      const [pnlData, ibkrData, sniperData, gridData, fundingData, systemData] = await Promise.allSettled([
-        apiFetch('/api/pnl'),
-        apiFetch('/api/ibkr'),
-        apiFetch('/api/sniper'),
-        apiFetch('/api/grid'),
-        apiFetch('/api/funding'),
-        apiFetch('/api/system'),
-      ]);
-      if (pnlData.status     === 'fulfilled') setPnl(pnlData.value);
-      if (ibkrData.status    === 'fulfilled') setIbkr(ibkrData.value);
-      if (sniperData.status  === 'fulfilled') setSniper(sniperData.value);
-      if (gridData.status    === 'fulfilled') setGrid(gridData.value);
-      if (fundingData.status === 'fulfilled') setFunding(fundingData.value);
-      if (systemData.status  === 'fulfilled') setSystem(systemData.value);
-      setOnline(true);
-      setLastUpdate(new Date().toLocaleTimeString());
-    } catch {
-      setOnline(false);
-    } finally {
-      setLoading(false);
-    }
+    const errs = {};
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR] = await Promise.allSettled([
+      apiFetch('/api/pnl'),
+      apiFetch('/api/ibkr'),
+      apiFetch('/api/sniper'),
+      apiFetch('/api/grid'),
+      apiFetch('/api/funding'),
+      apiFetch('/api/system'),
+    ]);
+    if (pnlR.status     === 'fulfilled') setPnl(pnlR.value);       else errs.pnl = pnlR.reason?.message;
+    if (ibkrR.status    === 'fulfilled') setIbkr(ibkrR.value);     else errs.ibkr = ibkrR.reason?.message;
+    if (sniperR.status  === 'fulfilled') setSniper(sniperR.value); else errs.sniper = sniperR.reason?.message;
+    if (gridR.status    === 'fulfilled') setGrid(gridR.value);     else errs.grid = gridR.reason?.message;
+    if (fundingR.status === 'fulfilled') setFunding(fundingR.value); else errs.funding = fundingR.reason?.message;
+    if (systemR.status  === 'fulfilled') setSystem(systemR.value); else errs.system = systemR.reason?.message;
+    setErrors(errs);
+    setOnline(Object.keys(errs).length < 6);
+    setLastUpdate(new Date().toLocaleTimeString());
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -816,7 +822,6 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Header */}
       <header className="header">
         <div className="header-logo">
           <div className="header-logo-icon">
@@ -827,7 +832,6 @@ export default function App() {
             <div className="header-subtitle">Algorithmic Trading Monitor</div>
           </div>
         </div>
-
         <div className="header-right">
           {lastUpdate && (
             <div className="status-pill">
@@ -837,19 +841,18 @@ export default function App() {
           )}
           <div className="status-pill">
             <div className={`status-dot ${online === false ? 'offline' : ''}`} />
-            {online === null ? 'Connecting…' : online ? 'Online' : 'Offline'}
+            {online === null ? 'Connecting…' : online ? 'Online' : 'Parcial'}
           </div>
           <button className={`refresh-btn ${loading ? 'spinning' : ''}`} onClick={fetchAll}>
-            <RefreshCw size={12} />
-            Refresh
+            <RefreshCw size={12} />Refresh
           </button>
         </div>
       </header>
 
-      {/* Tabs */}
       <nav className="tabs">
         {TABS.map((t) => {
-          const Icon = t.icon;
+          const Icon  = t.icon;
+          const hasErr = errors[t.id];
           return (
             <button
               key={t.id}
@@ -858,20 +861,20 @@ export default function App() {
             >
               <Icon size={14} />
               {t.label}
+              {hasErr && <span className="tab-badge" style={{ background: 'var(--red)' }}>!</span>}
             </button>
           );
         })}
       </nav>
 
-      {/* Content */}
       <main className="content">
-        {activeTab === 'overview' && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} funding={funding} />}
-        {activeTab === 'ibkr'     && <IBKRTab    data={ibkr} />}
-        {activeTab === 'sniper'   && <SniperTab  data={sniper} />}
-        {activeTab === 'grid'     && <GridTab    data={grid} />}
-        {activeTab === 'funding'  && <FundingTab data={funding} />}
+        {activeTab === 'overview' && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} />}
+        {activeTab === 'ibkr'     && (errors.ibkr    ? <ErrBox msg={errors.ibkr}    /> : <IBKRTab    data={ibkr}    />)}
+        {activeTab === 'sniper'   && (errors.sniper  ? <ErrBox msg={errors.sniper}  /> : <SniperTab  data={sniper}  />)}
+        {activeTab === 'grid'     && (errors.grid    ? <ErrBox msg={errors.grid}    /> : <GridTab    data={grid}    />)}
+        {activeTab === 'funding'  && (errors.funding ? <ErrBox msg={errors.funding} /> : <FundingTab data={funding} />)}
         {activeTab === 'logs'     && <LogsTab />}
-        {activeTab === 'system'   && <SystemTab  data={system} />}
+        {activeTab === 'system'   && (errors.system  ? <ErrBox msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
     </div>
   );
