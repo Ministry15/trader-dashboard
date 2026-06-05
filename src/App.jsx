@@ -12,11 +12,8 @@ import {
 } from 'lucide-react';
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = '/api-proxy';
-const HEADERS = { 'x-api-key': 'JPxK9m2026TraderB0t!', 'Content-Type': 'application/json' };
-
 async function apiFetch(endpoint) {
-  const res = await fetch(`${BASE}${endpoint}`, { headers: HEADERS });
+  const res = await fetch(`/api/proxy?path=${encodeURIComponent(endpoint)}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

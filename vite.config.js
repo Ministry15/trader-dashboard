@@ -6,10 +6,14 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api-proxy': {
+      '/api/proxy': {
         target: 'http://178.104.133.71:8000',
         changeOrigin: true,
-        rewrite: path => path.replace(/^\/api-proxy/, ''),
+        headers: { 'x-api-key': 'JPxK9m2026TraderB0t!' },
+        rewrite: path => {
+          const m = path.match(/[?&]path=([^&]+)/)
+          return m ? decodeURIComponent(m[1]) : '/'
+        },
       },
     },
   },
