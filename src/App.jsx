@@ -1,1081 +1,650 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
-} from 'recharts';
+  XAxis, YAxis, Tooltip, ResponsiveContainer,
+} from 'recharts'
 import {
-  Activity, TrendingUp, TrendingDown, Zap, Grid, DollarSign,
-  Server, FileText, RefreshCw, AlertTriangle,
-  CheckCircle, XCircle, Clock, Cpu, HardDrive, MemoryStick,
-  BarChart2, Target, Shield
-} from 'lucide-react';
+  Activity, TrendingUp, TrendingDown, Zap, RefreshCw,
+  AlertTriangle, CheckCircle, XCircle, Clock, Cpu,
+  HardDrive, Server, Database, ArrowUpRight, ArrowDownRight,
+  BarChart2, Target, Shield, Grid3x3, Layers,
+} from 'lucide-react'
 
-// ─── API client ──────────────────────────────────────────────────────────────
-const BASE = '/api-proxy';
-const HEADERS = { 'x-api-key': 'JPxK9m2026TraderB0t!', 'Content-Type': 'application/json' };
+// ─── API ─────────────────────────────────────────────────────────────────────
+const API = '/api-proxy'
+const HDR = { Authorization: 'Bearer JPxK9m2026TraderB0t!', 'Content-Type': 'application/json' }
+const REFRESH = 30_000
 
-async function apiFetch(endpoint) {
-  const res = await fetch(`${BASE}${endpoint}`, { headers: HEADERS });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+async function apiFetch(path) {
+  const r = await fetch(API + path, { headers: HDR })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return r.json()
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const fmt = (n, decimals = 2) =>
-  n == null ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-
-const fmtUSD = (n) =>
-  n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-const fmtBNB = (n) =>
-  n == null ? '—' : (n < 0 ? '-' : '') + Math.abs(Number(n)).toFixed(6) + ' BNB';
-
-const pct = (n) => n == null ? '—' : `${Number(n).toFixed(2)}%`;
-
-const clr = (n) => n == null ? '' : Number(n) >= 0 ? 'positive' : 'negative';
-
-function Loader() {
-  return (
-    <div className="loading-state">
-      <RefreshCw size={18} />
-      Loading…
-    </div>
-  );
+// ─── Bot metadata ─────────────────────────────────────────────────────────────
+const BOT = {
+  grid:          { label: 'WBNB Grid',    pair: 'WBNB/USDT',  chain: 'BSC',    color: '#f59e0b', icon: Grid3x3 },
+  pepe_grid:     { label: 'PEPE Grid',    pair: 'PEPE/USDT',  chain: 'BSC',    color: '#22c55e', icon: Grid3x3 },
+  solana_grid:   { label: 'SOL Grid',     pair: 'SOL/USDC',   chain: 'Solana', color: '#9945ff', icon: Grid3x3 },
+  sniper:        { label: 'BSC Sniper',   pair: 'Any Token',  chain: 'BSC',    color: '#ef4444', icon: Target },
+  funding_rate:  { label: 'Funding Rate', pair: 'DOGE/USDT',  chain: 'CEX',    color: '#60a5fa', icon: TrendingUp },
+  dca:           { label: 'DCA',          pair: 'WBNB/USDT',  chain: 'BSC',    color: '#e8600a', icon: Layers },
+  arbitrage:     { label: 'Arbitrage',    pair: 'Multi-DEX',  chain: 'BSC',    color: '#10b981', icon: Zap },
+  cex_grid:      { label: 'CEX Grid',     pair: 'DOGE/USDT',  chain: 'CEX',    color: '#8b5cf6', icon: Grid3x3 },
+  solana_sniper: { label: 'SOL Sniper',   pair: 'Any Token',  chain: 'Solana', color: '#ec4899', icon: Target },
 }
 
-function ErrBox({ msg }) {
-  return <div className="error-state"><AlertTriangle size={14} style={{ marginRight: 6 }} />{msg}</div>;
+const PRIMARY = ['grid', 'pepe_grid', 'solana_grid', 'sniper', 'funding_rate']
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'bots',     label: 'Bots' },
+  { id: 'trades',   label: 'Trades' },
+  { id: 'vps',      label: 'VPS' },
+]
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const f2   = n => n == null ? '—' : Number(n).toFixed(2)
+const fUSD = n => {
+  if (n == null) return '—'
+  const v = Number(n)
+  return (v < 0 ? '-$' : '$') + Math.abs(v).toFixed(2)
+}
+const fNum = n => n == null ? '—' : Number(n).toLocaleString()
+const fPct = n => n == null ? '—' : `${Number(n).toFixed(1)}%`
+
+function clr(n) {
+  if (n == null) return 'text-slate-400'
+  return Number(n) > 0 ? 'text-profit' : Number(n) < 0 ? 'text-loss' : 'text-slate-400'
 }
 
-function CustomTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{
-      background: '#12122a', border: '1px solid #1a1a33', borderRadius: 8,
-      padding: '10px 14px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12
-    }}>
-      <div style={{ color: '#7070a0', marginBottom: 4 }}>{label}</div>
-      {payload.map((p) => (
-        <div key={p.dataKey} style={{ color: p.color || '#00ff88' }}>
-          {p.name}: <strong>{p.value}</strong>
-        </div>
-      ))}
-    </div>
-  );
+function ago(ts) {
+  if (!ts) return '—'
+  const s = Math.floor((Date.now() - new Date(ts + (ts.includes('Z') ? '' : 'Z')).getTime()) / 1000)
+  if (s < 0)    return 'just now'
+  if (s < 60)   return `${s}s ago`
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  return `${Math.floor(s / 86400)}d ago`
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: OVERVIEW
-// API: { today: {sniper_bnb, sniper_trades, sniper_win_rate, grid_usdt, grid_trades},
-//        history_7d: [{date, sniper_bnb, grid_usdt, ibkr_usd}] }
-// ─────────────────────────────────────────────────────────────────────────────
-function OverviewTab({ pnl, ibkr, sniper, grid }) {
-  if (!pnl) return <Loader />;
-
-  const todayBNB   = pnl.today?.sniper_bnb   ?? 0;
-  const todayUSDT  = pnl.today?.grid_usdt    ?? 0;
-  const totalTrades= (pnl.today?.sniper_trades ?? 0) + (pnl.today?.grid_trades ?? 0);
-  const winRate    = pnl.today?.sniper_win_rate ?? sniper?.win_rate ?? 0;
-
-  const history   = pnl.history_7d ?? [];
-  const chartData = history.map((d) => ({
-    day: (d.date ?? '').slice(5),
-    sniper: Number(d.sniper_bnb ?? 0),
-    grid:   Number(d.grid_usdt  ?? 0),
-  }));
-
-  const weekSniper = history.reduce((s, d) => s + (Number(d.sniper_bnb) || 0), 0);
-  const weekGrid   = history.reduce((s, d) => s + (Number(d.grid_usdt)  || 0), 0);
-
-  const regime = String(ibkr?.regime?.regime ?? ibkr?.regime ?? 'UNKNOWN');
-  const regimeClass = regime.toLowerCase().includes('bull') ? 'bull'
-    : regime.toLowerCase().includes('bear') ? 'bear'
-    : regime.toLowerCase().includes('range') || regime.toLowerCase().includes('sideways') ? 'range'
-    : 'unknown';
-
-  return (
-    <div>
-      <div className="grid-4 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Sniper P&amp;L Today</div>
-          <div className={`stat-value ${todayBNB < 0 ? 'negative' : ''}`} style={{ fontSize: 20 }}>
-            {fmtBNB(todayBNB)}
-          </div>
-          <div className="stat-sub">BSC net</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Grid P&amp;L Today</div>
-          <div className={`stat-value ${todayUSDT < 0 ? 'negative' : ''}`} style={{ fontSize: 20 }}>
-            {fmtUSD(todayUSDT)}
-          </div>
-          <div className="stat-sub">USDT net</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Win Rate (Sniper)</div>
-          <div className="stat-value">{pct(winRate)}</div>
-          <div className="stat-sub">today</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Total Trades</div>
-          <div className="stat-value neutral">{totalTrades}</div>
-          <div className="stat-sub">sniper + grid hoje</div>
-        </div>
-      </div>
-
-      <div className="grid-2 section-gap">
-        <div className="card">
-          <div className="card-title"><TrendingUp size={14} />7-Day P&amp;L History</div>
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1a1a33" />
-                <XAxis dataKey="day" tick={{ fill: '#7070a0', fontSize: 10 }} />
-                <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} />
-                <Tooltip content={<CustomTooltip />} />
-                <ReferenceLine y={0} stroke="#333360" />
-                <Bar dataKey="sniper" name="Sniper BNB" fill="#00ff88" radius={[3,3,0,0]} />
-                <Bar dataKey="grid"   name="Grid USDT"  fill="#4488ff" radius={[3,3,0,0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="empty-state">Sem histórico</div>
-          )}
-        </div>
-
-        <div className="card">
-          <div className="card-title"><Activity size={14} />Resumo Semanal</div>
-          <div style={{ marginBottom: 16 }}>
-            <span className={`regime-pill regime-${regimeClass}`}>
-              {regimeClass === 'bull' && <TrendingUp size={12} />}
-              {regimeClass === 'bear' && <TrendingDown size={12} />}
-              {regime}
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <span className="dim mono">Sniper 7d</span>
-              <span className={`mono ${clr(weekSniper)}`}>{fmtBNB(weekSniper)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <span className="dim mono">Grid 7d</span>
-              <span className={`mono ${clr(weekGrid)}`}>{fmtUSD(weekGrid)}</span>
-            </div>
-            {ibkr?.regime?.vix != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">VIX</span>
-                <span className="mono" style={{ color: ibkr.regime.vix > 25 ? 'var(--yellow)' : 'var(--text)' }}>
-                  {fmt(ibkr.regime.vix)}
-                </span>
-              </div>
-            )}
-            {ibkr?.regime?.spy != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">SPY</span>
-                <span className="mono">${fmt(ibkr.regime.spy)}</span>
-              </div>
-            )}
-            {ibkr?.signals?.signals_today != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">IBKR Signals Hoje</span>
-                <span className="mono positive">{ibkr.signals.signals_today}</span>
-              </div>
-            )}
-            {grid?.active_bots != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">Grid Bots Activos</span>
-                <span className="mono positive">{grid.active_bots}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+function isRecent(ts, minutes = 15) {
+  if (!ts) return false
+  return (Date.now() - new Date(ts + (ts.includes('Z') ? '' : 'Z')).getTime()) < minutes * 60000
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: IBKR
-// API: { account, mode, regime: {regime, spy, vix}, signals: {signals_today, orders_placed, recent_signals: [{strategy, ticker, direction, price, stop_loss, take_profit, score, timestamp}]} }
-// ─────────────────────────────────────────────────────────────────────────────
-function IBKRTab({ data }) {
-  if (!data) return <Loader />;
+// ─── Data hook ───────────────────────────────────────────────────────────────
+function useData() {
+  const [st, setSt] = useState({ status: null, bots: null, botMap: {}, trades: null, vps: null })
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
+  const [lastRefresh, setLastRefresh] = useState(null)
+  const timerRef = useRef(null)
 
-  const regime   = String(data.regime?.regime ?? 'UNKNOWN');
-  const vix      = data.regime?.vix  ?? null;
-  const spy      = data.regime?.spy  ?? null;
-  const signals  = data.signals?.recent_signals ?? [];
-  const sigCount = data.signals?.signals_today  ?? signals.length;
-  const orders   = data.signals?.orders_placed  ?? 0;
-
-  const regimeClass = regime.toLowerCase().includes('bull') ? 'bull'
-    : regime.toLowerCase().includes('bear') ? 'bear'
-    : regime.toLowerCase().includes('range') ? 'range'
-    : 'unknown';
-
-  return (
-    <div>
-      <div className="grid-4 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Regime</div>
-          <div style={{ marginTop: 10 }}>
-            <span className={`regime-pill regime-${regimeClass}`}>
-              {regimeClass === 'bull' && <TrendingUp size={12} />}
-              {regimeClass === 'bear' && <TrendingDown size={12} />}
-              {regime}
-            </span>
-          </div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">VIX</div>
-          <div className="stat-value" style={{ fontSize: 22, color: vix > 25 ? 'var(--yellow)' : 'var(--green)' }}>
-            {vix != null ? fmt(vix) : '—'}
-          </div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">SPY</div>
-          <div className="stat-value neutral" style={{ fontSize: 22 }}>
-            {spy != null ? `$${fmt(spy)}` : '—'}
-          </div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Sinais Hoje</div>
-          <div className="stat-value neutral">{sigCount}</div>
-          <div className="stat-sub">{orders} ordens executadas</div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-title"><Zap size={14} />Sinais Recentes — {data.account} ({data.mode})</div>
-        {signals.length === 0 ? (
-          <div className="empty-state">Sem sinais recentes</div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th>Direção</th>
-                  <th>Preço</th>
-                  <th>Stop Loss</th>
-                  <th>Take Profit</th>
-                  <th>Score</th>
-                  <th>Estratégia</th>
-                  <th>Timestamp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {signals.map((s, i) => (
-                  <tr key={i}>
-                    <td style={{ fontWeight: 700 }}>{s.ticker ?? '—'}</td>
-                    <td>
-                      <span className={`badge ${(s.direction ?? '').toLowerCase() === 'long' ? 'badge-green' : 'badge-red'}`}>
-                        {s.direction ?? '—'}
-                      </span>
-                    </td>
-                    <td className="mono">{s.price   != null ? `$${fmt(s.price,   2)}` : '—'}</td>
-                    <td className="mono negative">{s.stop_loss   != null ? `$${fmt(s.stop_loss,   2)}` : '—'}</td>
-                    <td className="mono positive">{s.take_profit != null ? `$${fmt(s.take_profit, 2)}` : '—'}</td>
-                    <td style={{ color: 'var(--blue)' }}>{s.score ?? '—'}</td>
-                    <td className="dim">{s.strategy ?? '—'}</td>
-                    <td className="dim" style={{ fontSize: 11 }}>{s.timestamp ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: SNIPER
-// API: { total_pnl_bnb, wins, losses, win_rate, total_trades,
-//        recent_trades: [{type, side, token, pnl, timestamp}],
-//        pnl_history: [{date, pnl_bnb, trades, win_rate}] }
-// ─────────────────────────────────────────────────────────────────────────────
-function SniperTab({ data }) {
-  if (!data) return <Loader />;
-
-  const trades    = data.recent_trades   ?? [];
-  const history   = data.pnl_history     ?? [];
-  const totalBNB  = data.total_pnl_bnb   ?? 0;
-  const totalUSDT = data.total_pnl_usdt  ?? 0;
-  const winRate   = data.win_rate        ?? 0;
-  const wins      = data.wins            ?? 0;
-  const losses    = data.losses          ?? 0;
-
-  const chartData = history.map((d) => ({
-    day:  (d.date ?? '').slice(5),
-    bnb:  Number(d.pnl_bnb  ?? 0),
-    usdt: Number(d.pnl_usdt ?? 0),
-  }));
-
-  return (
-    <div>
-      <div className="grid-4 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Win Rate</div>
-          <div className="stat-value">{pct(winRate)}</div>
-          <div className="stat-sub">{wins}W / {losses}L</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">P&amp;L BNB (7d)</div>
-          <div className={`stat-value ${totalBNB < 0 ? 'negative' : ''}`} style={{ fontSize: 18 }}>
-            {fmtBNB(totalBNB)}
-          </div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">P&amp;L USDT (7d)</div>
-          <div className={`stat-value ${totalUSDT < 0 ? 'negative' : ''}`} style={{ fontSize: 18 }}>
-            {fmtUSD(totalUSDT)}
-          </div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Total Trades</div>
-          <div className="stat-value neutral">{data.total_trades ?? 0}</div>
-        </div>
-      </div>
-
-      {chartData.length > 0 && (
-        <div className="card section-gap">
-          <div className="card-title"><BarChart2 size={14} />P&amp;L 7 dias</div>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a33" />
-              <XAxis dataKey="day" tick={{ fill: '#7070a0', fontSize: 10 }} />
-              <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} />
-              <Tooltip content={<CustomTooltip />} />
-              <ReferenceLine y={0} stroke="#333360" />
-              <Bar dataKey="bnb"  name="BNB"  fill="#00ff88" radius={[3,3,0,0]} />
-              <Bar dataKey="usdt" name="USDT" fill="#4488ff" radius={[3,3,0,0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      <div className="card">
-        <div className="card-title"><Target size={14} />Trades Recentes — BSC Sniper</div>
-        {trades.length === 0 ? (
-          <div className="empty-state">Sem trades recentes</div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Token</th>
-                  <th>Resultado</th>
-                  <th>P&amp;L</th>
-                  <th>Moeda</th>
-                  <th>Timestamp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...trades].reverse().map((t, i) => (
-                  <tr key={i}>
-                    <td style={{ fontWeight: 700, fontSize: 11 }}>{t.token ?? '—'}</td>
-                    <td>
-                      <span className={`badge ${t.type === 'TAKE_PROFIT' ? 'badge-green' : 'badge-red'}`}>
-                        {t.type === 'TAKE_PROFIT' ? 'TP' : t.type === 'STOP_LOSS' ? 'SL' : t.type ?? '—'}
-                      </span>
-                    </td>
-                    <td className={`mono ${clr(t.pnl)}`}>
-                      {t.pnl != null ? (t.pnl >= 0 ? '+' : '') + Number(t.pnl).toFixed(6) : '—'}
-                    </td>
-                    <td>
-                      <span className={`badge ${t.currency === 'WBNB' ? 'badge-yellow' : 'badge-blue'}`}>
-                        {t.currency ?? '—'}
-                      </span>
-                    </td>
-                    <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: GRID — Bot Panel (sub-tab content)
-// ─────────────────────────────────────────────────────────────────────────────
-function GridBotPanel({ bot, allTrades, onBack }) {
-  const botTrades = allTrades.filter(
-    (t) => (t.pair ?? '').toUpperCase() === (bot.pair ?? '').toUpperCase()
-  );
-
-  const botPnl = botTrades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
-  const buys   = botTrades.filter((t) => (t.side ?? '').toLowerCase() === 'buy').length;
-  const sells  = botTrades.filter((t) => (t.side ?? '').toLowerCase() === 'sell').length;
-
-  // cumulative P&L chart — oldest first
-  let running = 0;
-  const chartData = [...botTrades].reverse().map((_, i, arr) => {
-    running += Number(arr[i].pnl ?? 0);
-    return { n: i + 1, pnl: Number(running.toFixed(4)) };
-  });
-
-  const status  = bot.status ?? 'dry_run';
-  const isLive  = /^live|running$/i.test(status);
-
-  // price position within range (0–100 %)
-  let pricePct = null;
-  if (bot.price != null && bot.lower != null && bot.upper != null && bot.upper > bot.lower) {
-    pricePct = Math.min(100, Math.max(0,
-      ((bot.price - bot.lower) / (bot.upper - bot.lower)) * 100
-    ));
-  }
-  const inRange = pricePct !== null && pricePct >= 0 && pricePct <= 100;
-
-  const gradId = `grad-${(bot.pair ?? 'bot').replace('/', '-')}`;
-
-  return (
-    <div>
-      {/* KPIs */}
-      <div className="grid-4 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Preço Actual</div>
-          <div className={`stat-value ${!inRange ? 'negative' : 'neutral'}`} style={{ fontSize: 18 }}>
-            {bot.price != null ? fmt(bot.price, 4) : '—'}
-          </div>
-          <div className="stat-sub" style={{ color: inRange ? 'var(--green)' : 'var(--red)' }}>
-            {pricePct !== null ? (inRange ? 'dentro do range' : 'fora do range') : ''}
-          </div>
-        </div>
-
-        <div className="stat-tile">
-          <div className="stat-label">Range</div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
-            <span className="mono dim" style={{ fontSize: 13 }}>{bot.lower != null ? fmt(bot.lower, 4) : '—'}</span>
-            <span className="mono dim" style={{ fontSize: 13 }}>{bot.upper != null ? fmt(bot.upper, 4) : '—'}</span>
-          </div>
-          {pricePct !== null && (
-            <div className="range-bar-wrap">
-              <div className="range-bar-fill" style={{ left: 0, width: '100%' }} />
-              <div className="range-bar-price" style={{ left: `${pricePct}%` }} />
-            </div>
-          )}
-          {bot.range && <div className="stat-sub" style={{ marginTop: 10 }}>{bot.range}</div>}
-        </div>
-
-        <div className="stat-tile">
-          <div className="stat-label">Níveis / Estado</div>
-          <div className="stat-value neutral" style={{ fontSize: 22 }}>{bot.levels ?? '—'}</div>
-          <div style={{ marginTop: 8 }}>
-            <span className={`badge ${isLive ? 'badge-green' : 'badge-yellow'}`}>{status}</span>
-          </div>
-        </div>
-
-        <div className="stat-tile">
-          <div className="stat-label">P&amp;L Bot</div>
-          <div className={`stat-value ${botPnl < 0 ? 'negative' : ''}`} style={{ fontSize: 18 }}>
-            {fmtUSD(botPnl)}
-          </div>
-          <div className="stat-sub">{buys}B / {sells}S · {botTrades.length} trades</div>
-        </div>
-      </div>
-
-      {/* Cumulative P&L chart */}
-      {chartData.length > 1 && (
-        <div className="card section-gap">
-          <div className="card-title"><Activity size={14} />P&amp;L Acumulado — {bot.pair}</div>
-          <ResponsiveContainer width="100%" height={160}>
-            <AreaChart data={chartData}>
-              <defs>
-                <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={botPnl >= 0 ? '#00ff88' : '#ff4466'} stopOpacity={0.2} />
-                  <stop offset="95%" stopColor={botPnl >= 0 ? '#00ff88' : '#ff4466'} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a33" />
-              <XAxis dataKey="n" tick={{ fill: '#7070a0', fontSize: 10 }} />
-              <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} />
-              <Tooltip content={<CustomTooltip />} />
-              <ReferenceLine y={0} stroke="#333360" />
-              <Area
-                type="monotone"
-                dataKey="pnl"
-                name="P&L USDT"
-                stroke={botPnl >= 0 ? '#00ff88' : '#ff4466'}
-                fill={`url(#${gradId})`}
-                strokeWidth={2}
-                dot={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* Trades table */}
-      <div className="card">
-        <div className="card-title"><Target size={14} />Trades Recentes — {bot.pair}</div>
-        {botTrades.length === 0 ? (
-          <div className="empty-state">Sem trades para {bot.pair}</div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Side</th>
-                  <th>Preço</th>
-                  <th>P&amp;L</th>
-                  <th>Timestamp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {botTrades.slice(0, 30).map((t, i) => (
-                  <tr key={i}>
-                    <td className="dim mono" style={{ fontSize: 10 }}>{botTrades.length - i}</td>
-                    <td>
-                      <span className={`badge ${(t.side ?? '').toLowerCase() === 'buy' ? 'badge-green' : 'badge-red'}`}>
-                        {t.side ?? '—'}
-                      </span>
-                    </td>
-                    <td className="mono">{t.price != null ? fmt(t.price, 4) : '—'}</td>
-                    <td className={`mono ${clr(t.pnl)}`}>{t.pnl != null ? fmtUSD(t.pnl) : 'dry_run'}</td>
-                    <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: GRID
-// API: { total_pnl, total_trades, recent_trades: [{side, pair, price, pnl, timestamp}],
-//        active_bots, active_grids: [{bot, pair, price, range, levels, lower, upper, status}] }
-// ─────────────────────────────────────────────────────────────────────────────
-function GridTab({ data }) {
-  const [subTab, setSubTab] = useState('overview');
-  if (!data) return <Loader />;
-
-  const bots   = data.active_grids ?? [];
-  const trades = data.recent_trades ?? [];
-
-  // keep subTab valid when data refreshes
-  const validPairs = bots.map((b) => b.pair);
-  const active = validPairs.includes(subTab) ? subTab : 'overview';
-
-  return (
-    <div>
-      {/* Summary KPIs — always visible */}
-      <div className="grid-3 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Bots Activos</div>
-          <div className="stat-value neutral">{data.active_bots ?? bots.length}</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Total P&amp;L</div>
-          <div className={`stat-value ${(data.total_pnl ?? 0) < 0 ? 'negative' : ''}`}>
-            {fmtUSD(data.total_pnl)}
-          </div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Grid Trades</div>
-          <div className="stat-value neutral">{data.total_trades ?? trades.length}</div>
-        </div>
-      </div>
-
-      {bots.length === 0 ? (
-        <div className="card">
-          <div className="empty-state">Sem bots activos detectados nos logs</div>
-        </div>
-      ) : (
-        <>
-          {/* Sub-tab nav */}
-          <div className="sub-tabs">
-            <button
-              className={`sub-tab ${active === 'overview' ? 'active' : ''}`}
-              onClick={() => setSubTab('overview')}
-            >
-              <Grid size={12} />Overview
-            </button>
-            {bots.map((b) => (
-              <button
-                key={b.pair}
-                className={`sub-tab ${active === b.pair ? 'active' : ''}`}
-                onClick={() => setSubTab(b.pair)}
-              >
-                {b.pair}
-              </button>
-            ))}
-          </div>
-
-          {/* Overview sub-tab */}
-          {active === 'overview' && (
-            <>
-              <div className="card section-gap">
-                <div className="card-title"><Grid size={14} />Grid Bots Activos</div>
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Bot</th>
-                        <th>Par</th>
-                        <th>Preço</th>
-                        <th>Lower</th>
-                        <th>Upper</th>
-                        <th>Range</th>
-                        <th>Níveis</th>
-                        <th>Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bots.map((b, i) => (
-                        <tr key={i} style={{ cursor: 'pointer' }} onClick={() => setSubTab(b.pair)}>
-                          <td className="dim" style={{ fontSize: 11 }}>{b.bot ?? '—'}</td>
-                          <td style={{ fontWeight: 700, color: 'var(--blue)' }}>{b.pair ?? '—'}</td>
-                          <td className="mono">{b.price != null ? fmt(b.price, 4) : '—'}</td>
-                          <td className="mono dim">{b.lower != null ? fmt(b.lower, 4) : '—'}</td>
-                          <td className="mono dim">{b.upper != null ? fmt(b.upper, 4) : '—'}</td>
-                          <td className="mono">{b.range ?? '—'}</td>
-                          <td className="mono">{b.levels ?? '—'}</td>
-                          <td>
-                            <span className={`badge ${/^live|running$/i.test(b.status ?? '') ? 'badge-green' : 'badge-yellow'}`}>
-                              {b.status ?? 'dry_run'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {trades.length > 0 && (
-                <div className="card">
-                  <div className="card-title"><Activity size={14} />Todos os Trades Recentes</div>
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Par</th>
-                          <th>Side</th>
-                          <th>Preço</th>
-                          <th>P&amp;L</th>
-                          <th>Timestamp</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {trades.slice(0, 30).map((t, i) => (
-                          <tr key={i}>
-                            <td
-                              style={{ fontWeight: 700, color: 'var(--blue)', cursor: 'pointer' }}
-                              onClick={() => setSubTab(t.pair)}
-                            >
-                              {t.pair ?? '—'}
-                            </td>
-                            <td>
-                              <span className={`badge ${(t.side ?? '').toLowerCase() === 'buy' ? 'badge-green' : 'badge-red'}`}>
-                                {t.side ?? '—'}
-                              </span>
-                            </td>
-                            <td className="mono">{t.price != null ? fmt(t.price, 4) : '—'}</td>
-                            <td className={`mono ${clr(t.pnl)}`}>{t.pnl != null ? fmtUSD(t.pnl) : 'dry_run'}</td>
-                            <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Per-bot sub-tabs */}
-          {bots.map((b) =>
-            active === b.pair
-              ? <GridBotPanel key={b.pair} bot={b} allTrades={trades} />
-              : null
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: FUNDING
-// API: { active_positions, positions: [{symbol, side, size, entry, mark, funding_rate, funding_earned, unrealized_pnl}],
-//        total_earned_usdt }
-// ─────────────────────────────────────────────────────────────────────────────
-function FundingTab({ data }) {
-  if (!data) return <Loader />;
-
-  const positions   = data.positions         ?? [];
-  const totalEarned = data.total_earned_usdt ?? null;
-
-  return (
-    <div>
-      <div className="grid-2 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Posições Abertas</div>
-          <div className="stat-value neutral">{data.active_positions ?? positions.length}</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-label">Funding Earned</div>
-          <div className="stat-value">{fmtUSD(totalEarned)}</div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-title"><DollarSign size={14} />Funding Rate Positions</div>
-        {positions.length === 0 ? (
-          <div className="empty-state">Sem posições abertas detectadas nos logs</div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Side</th>
-                  <th>Size (USDT/ordem)</th>
-                  <th>Lower</th>
-                  <th>Upper</th>
-                  <th>Funding Earned</th>
-                  <th>Unr. P&amp;L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.map((p, i) => (
-                  <tr key={i}>
-                    <td style={{ fontWeight: 700 }}>{p.symbol ?? '—'}</td>
-                    <td>
-                      <span className={`badge ${(p.side ?? '').toLowerCase() === 'long' ? 'badge-green' : 'badge-red'}`}>
-                        {p.side ?? '—'}
-                      </span>
-                    </td>
-                    <td className="mono">{p.size  != null ? fmtUSD(p.size)  : '—'}</td>
-                    <td className="mono dim">{p.entry != null ? fmt(p.entry, 4) : '—'}</td>
-                    <td className="mono dim">{p.mark  != null ? fmt(p.mark,  4) : '—'}</td>
-                    <td className={`mono ${clr(p.funding_earned)}`}>{fmtUSD(p.funding_earned)}</td>
-                    <td className={`mono ${clr(p.unrealized_pnl)}`}>{fmtUSD(p.unrealized_pnl)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: LOGS
-// API: { service, count, logs: [{raw: string, level: INFO|WARN|ERROR|DEBUG}] }
-// ─────────────────────────────────────────────────────────────────────────────
-const LOG_SERVICES = [
-  { label: 'autonomous-trader', value: 'autonomous-trader' },
-  { label: 'crypto_bsc',        value: 'crypto_bsc' },
-  { label: 'ibc-gateway',       value: 'ibc-gateway' },
-  { label: 'tgbot-ibkr',        value: 'tgbot-ibkr' },
-  { label: 'tgbot-sniper',      value: 'tgbot-sniper' },
-  { label: 'tgbot-grid',        value: 'tgbot-grid' },
-  { label: 'tgbot-funding',     value: 'tgbot-funding' },
-  { label: 'hermes-gateway',    value: 'hermes-gateway' },
-];
-
-function LogsTab() {
-  const [service, setService] = useState('autonomous-trader');
-  const [lines, setLines]     = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
-  const bottomRef = useRef(null);
-
-  const fetchLogs = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const refresh = useCallback(async () => {
     try {
-      const data = await apiFetch(`/api/logs/${service}`);
-      // logs is array of {raw, level} objects
-      const raw = (data.logs ?? []).map((l) => (typeof l === 'object' ? l.raw : l) ?? '');
-      setLines(raw);
+      const [status, botsRes, tradesRes, vps] = await Promise.all([
+        apiFetch('/api/status'),
+        apiFetch('/api/bots'),
+        apiFetch('/api/trades?limit=60'),
+        apiFetch('/api/vps'),
+      ])
+      const botMap = {}
+      ;(botsRes.bots || []).forEach(b => { botMap[b.bot] = b })
+      setSt({ status, bots: botsRes, botMap, trades: tradesRes, vps })
+      setLastRefresh(new Date())
+      setErr(null)
     } catch (e) {
-      setError(e.message);
+      setErr(e.message)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, [service]);
-
-  useEffect(() => { fetchLogs(); }, [fetchLogs]);
+  }, [])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [lines]);
+    refresh()
+    timerRef.current = setInterval(refresh, REFRESH)
+    return () => clearInterval(timerRef.current)
+  }, [refresh])
 
-  function parseLevel(line) {
-    if (/ERROR|CRITICAL|FATAL/i.test(line)) return 'ERROR';
-    if (/WARN/i.test(line))  return 'WARN';
-    if (/DEBUG/i.test(line)) return 'DEBUG';
-    return 'INFO';
-  }
+  return { ...st, loading, err, refresh, lastRefresh }
+}
+
+// ─── UI Atoms ────────────────────────────────────────────────────────────────
+function Spinner({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="animate-spin text-brand">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity=".25" />
+      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function StatusDot({ active, pulse = true }) {
+  return (
+    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${active ? 'bg-profit' : 'bg-loss'} ${active && pulse ? 'animate-pulse' : ''}`} />
+  )
+}
+
+function Badge({ children, color = 'slate' }) {
+  const map = { slate: 'bg-slate-800 text-slate-300', green: 'bg-profit-muted text-profit', red: 'bg-loss-muted text-loss', amber: 'bg-amber-950 text-warn', blue: 'bg-blue-950 text-info', orange: 'bg-orange-950 text-brand' }
+  return <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono font-medium ${map[color] || map.slate}`}>{children}</span>
+}
+
+function Card({ children, className = '', onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      className={`bg-surface-700 border border-surface-line rounded-lg ${onClick ? 'cursor-pointer hover:border-surface-hover hover:bg-surface-600 transition-colors' : ''} ${className}`}
+    >
+      {children}
+    </div>
+  )
+}
+
+function SLabel({ children }) {
+  return <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-0.5">{children}</div>
+}
+
+function Divider() {
+  return <div className="border-t border-surface-line my-3" />
+}
+
+function GaugeBar({ pct, color = 'bg-info' }) {
+  const capped = Math.min(100, Math.max(0, pct || 0))
+  const barColor = capped > 85 ? 'bg-loss' : capped > 65 ? 'bg-warn' : color
+  return (
+    <div className="h-1.5 w-full bg-surface-500 rounded-full overflow-hidden">
+      <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${capped}%` }} />
+    </div>
+  )
+}
+
+// ─── Summary card ─────────────────────────────────────────────────────────────
+function KpiCard({ label, value, sub, icon: Icon, color = '', trend }) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-start justify-between mb-2">
+        <SLabel>{label}</SLabel>
+        {Icon && <Icon size={14} className="text-slate-600 shrink-0" />}
+      </div>
+      <div className={`text-xl font-mono font-bold tabular ${color || 'text-white'}`}>{value}</div>
+      {sub && <div className="text-xs text-slate-500 font-mono mt-1 tabular">{sub}</div>}
+      {trend != null && (
+        <div className={`flex items-center gap-0.5 mt-1.5 text-xs font-mono ${trend >= 0 ? 'text-profit' : 'text-loss'}`}>
+          {trend >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+          {fUSD(Math.abs(trend))} 24h
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// ─── Bot card ─────────────────────────────────────────────────────────────────
+function BotCard({ botId, data }) {
+  const meta = BOT[botId] || { label: botId, pair: '?', chain: '?', color: '#94a3b8', icon: Activity }
+  const Icon = meta.icon
+  const active = isRecent(data?.last_trade, 15)
 
   return (
-    <div className="card">
-      <div className="card-title" style={{ justifyContent: 'space-between' }}>
-        <span><FileText size={14} />Log Viewer</span>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <select className="log-select" value={service} onChange={(e) => setService(e.target.value)}>
-            {LOG_SERVICES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
-          <button className={`refresh-btn ${loading ? 'spinning' : ''}`} onClick={fetchLogs}>
-            <RefreshCw size={12} />Refresh
-          </button>
+    <Card className="p-4 flex flex-col gap-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded flex items-center justify-center shrink-0" style={{ background: meta.color + '22' }}>
+            <Icon size={14} style={{ color: meta.color }} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-white leading-tight">{meta.label}</div>
+            <div className="text-[10px] font-mono text-slate-500">{meta.pair}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 text-right">
+          <StatusDot active={active} />
+          <Badge color={meta.chain === 'Solana' ? 'blue' : meta.chain === 'CEX' ? 'amber' : 'slate'}>
+            {meta.chain}
+          </Badge>
         </div>
       </div>
 
-      {error ? <ErrBox msg={error} /> : (
-        <div className="log-console">
-          {lines.length === 0 && !loading && <span className="dim">Sem logs</span>}
-          {lines.map((line, i) => {
-            const level = parseLevel(line);
-            const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\s]*)/);
-            const ts   = tsMatch ? tsMatch[1] : null;
-            const rest = ts ? line.slice(ts.length).trim() : line;
-            return (
-              <span key={i} className="log-line">
-                {ts && <span className="log-ts">{ts}</span>}
-                <span className={`log-${level}`}>[{level}]</span>{' '}
-                <span className="log-text">{rest}</span>{'\n'}
-              </span>
-            );
-          })}
-          <div ref={bottomRef} />
+      {/* Metrics */}
+      <div className="grid grid-cols-3 gap-x-3 gap-y-2">
+        <div>
+          <SLabel>Trades</SLabel>
+          <div className="text-sm font-mono font-semibold text-white tabular">{fNum(data?.trades_total)}</div>
+        </div>
+        <div>
+          <SLabel>Volume</SLabel>
+          <div className="text-sm font-mono text-slate-300 tabular">{fUSD(data?.volume_total)}</div>
+        </div>
+        <div>
+          <SLabel>P&L (sim.)</SLabel>
+          <div className={`text-sm font-mono font-semibold tabular ${clr(data?.pnl_total)}`}>
+            {fUSD(data?.pnl_total)}
+          </div>
+        </div>
+        <div>
+          <SLabel>24h Trades</SLabel>
+          <div className="text-sm font-mono text-slate-300 tabular">{data?.trades_24h ?? '—'}</div>
+        </div>
+        <div>
+          <SLabel>24h P&L</SLabel>
+          <div className={`text-sm font-mono tabular ${clr(data?.pnl_24h)}`}>{fUSD(data?.pnl_24h)}</div>
+        </div>
+        <div>
+          <SLabel>Rate/h</SLabel>
+          <div className="text-sm font-mono text-slate-300 tabular">{data?.trades_1h ?? '—'}/h</div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-2 border-t border-surface-line">
+        <span className="text-[10px] text-slate-600 font-mono">Last: {ago(data?.last_trade)}</span>
+        <span className={`text-[10px] font-mono font-medium ${active ? 'text-profit' : 'text-slate-600'}`}>
+          {active ? '● LIVE' : '○ IDLE'}
+        </span>
+      </div>
+    </Card>
+  )
+}
+
+// ─── Trades table ─────────────────────────────────────────────────────────────
+function TradeRow({ t }) {
+  const meta = BOT[t.bot] || { label: t.bot, color: '#94a3b8' }
+  const hasDexBuy  = t.dex_buy  && t.dex_buy  !== 'null'
+  const hasDexSell = t.dex_sell && t.dex_sell !== 'null'
+  const side = hasDexBuy && !hasDexSell ? 'BUY' : hasDexSell && !hasDexBuy ? 'SELL' : 'BOTH'
+
+  return (
+    <tr className="border-b border-surface-line hover:bg-surface-hover transition-colors text-xs font-mono">
+      <td className="py-2 px-3 text-slate-500 tabular">{t.id}</td>
+      <td className="py-2 px-3 text-slate-400 tabular whitespace-nowrap">{t.ts?.slice(0, 16).replace('T', ' ')}</td>
+      <td className="py-2 px-3">
+        <span className="font-medium" style={{ color: meta.color }}>{meta.label}</span>
+      </td>
+      <td className="py-2 px-3 text-slate-300">{t.base}/{t.quote}</td>
+      <td className="py-2 px-3">
+        <span className={`font-medium ${side === 'BUY' ? 'text-profit' : side === 'SELL' ? 'text-loss' : 'text-info'}`}>
+          {side}
+        </span>
+      </td>
+      <td className="py-2 px-3 text-slate-300 tabular text-right">{fUSD(t.size_usd)}</td>
+      <td className={`py-2 px-3 tabular text-right font-medium ${clr(t.profit_usd)}`}>{fUSD(t.profit_usd)}</td>
+      <td className="py-2 px-3">
+        <Badge color={t.status === 'dry_run' ? 'amber' : 'green'}>{t.status}</Badge>
+      </td>
+    </tr>
+  )
+}
+
+// ─── VPS gauge ────────────────────────────────────────────────────────────────
+function VpsGauge({ label, pct, used, total, unit = '' }) {
+  const capped = Math.min(100, Math.max(0, pct || 0))
+  const barColor = capped > 85 ? 'text-loss' : capped > 65 ? 'text-warn' : 'text-info'
+  return (
+    <Card className="p-4">
+      <SLabel>{label}</SLabel>
+      <div className={`text-2xl font-mono font-bold tabular mb-1 ${barColor}`}>{fPct(pct)}</div>
+      <GaugeBar pct={pct} />
+      <div className="text-[10px] font-mono text-slate-500 mt-1.5 tabular">
+        {used}{unit} / {total}{unit}
+      </div>
+    </Card>
+  )
+}
+
+function SvcRow({ name, status }) {
+  const active = status === 'active'
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-surface-line last:border-0">
+      <span className="text-sm font-mono text-slate-300">{name}</span>
+      <div className="flex items-center gap-1.5">
+        <StatusDot active={active} pulse={false} />
+        <span className={`text-xs font-mono ${active ? 'text-profit' : 'text-loss'}`}>{status}</span>
+      </div>
+    </div>
+  )
+}
+
+// ─── Overview tab ─────────────────────────────────────────────────────────────
+function OverviewTab({ bots, botMap, status, vps }) {
+  const summary = bots?.summary || {}
+  const dryRun  = status?.dry_run ?? true
+  const cpuPct  = vps?.cpu_pct ?? 0
+  const memPct  = vps?.mem_pct ?? 0
+
+  // mini bar data — trades per bot
+  const barData = (bots?.bots || [])
+    .filter(b => b.trades_total > 0)
+    .sort((a, b) => b.trades_24h - a.trades_24h)
+    .slice(0, 8)
+    .map(b => ({ name: (BOT[b.bot]?.label || b.bot).split(' ')[0], v: b.trades_24h }))
+
+  return (
+    <div className="space-y-6">
+      {/* DRY_RUN banner */}
+      {dryRun && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-950/60 border border-warn/30 rounded-lg text-warn text-sm">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="font-medium">DRY RUN MODE</span>
+          <span className="text-slate-400 text-xs ml-1">— transacções construídas mas NÃO enviadas. P&L é simulado.</span>
+        </div>
+      )}
+
+      {/* KPI row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard label="Sim. P&L (Total)" value={fUSD(summary.total_pnl)} color={clr(summary.total_pnl)} trend={null} icon={TrendingUp} />
+        <KpiCard label="Total Trades" value={fNum(summary.total_trades)} sub={`${summary.trades_24h ?? '—'} nas últimas 24h`} icon={BarChart2} />
+        <KpiCard label="Volume (Total)" value={fUSD(summary.total_volume)} icon={Database} />
+        <KpiCard label="CPU / RAM" value={`${fPct(cpuPct)} / ${fPct(memPct)}`} sub={vps ? `Uptime: ${vps.uptime_human}` : '—'} icon={Cpu} />
+      </div>
+
+      {/* Primary bots grid */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Primary Bots</h2>
+          <span className="text-xs text-slate-500 font-mono">{summary.active_bots ?? '—'} active</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-3">
+          {PRIMARY.map(id => <BotCard key={id} botId={id} data={botMap[id]} />)}
+        </div>
+      </div>
+
+      {/* Activity chart */}
+      {barData.length > 0 && (
+        <div>
+          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">Trades 24h por Bot</h2>
+          <Card className="p-4">
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={barData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background: '#0c0c14', border: '1px solid #1e1e2d', borderRadius: 6, fontSize: 12, fontFamily: 'JetBrains Mono' }}
+                  labelStyle={{ color: '#94a3b8' }}
+                  cursor={{ fill: '#1e1e2d' }}
+                />
+                <Bar dataKey="v" fill="#e8600a" radius={[3, 3, 0, 0]} maxBarSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
         </div>
       )}
     </div>
-  );
+  )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: SYSTEM
-// API: { services: [{service, status, active, uptime_since}],
-//        cpu_percent, load_avg, memory_used_pct, disk_used_pct (float),
-//        disk_size, disk_used }
-// ─────────────────────────────────────────────────────────────────────────────
-function SystemTab({ data }) {
-  if (!data) return <Loader />;
-
-  const cpu    = data.cpu_percent     ?? null;
-  const ram    = data.memory_used_pct ?? null;
-  const disk   = typeof data.disk_used_pct === 'string'
-    ? parseFloat(data.disk_used_pct)
-    : data.disk_used_pct ?? null;
-
-  const gauges = [
-    { label: 'CPU',  icon: <Cpu size={14} />,         value: cpu,  extra: null },
-    { label: 'RAM',  icon: <MemoryStick size={14} />,  value: ram,  extra: null },
-    { label: 'Disk', icon: <HardDrive size={14} />,    value: disk, extra: `${data.disk_used ?? '?'} / ${data.disk_size ?? '?'}` },
-  ].filter((g) => g.value != null);
-
-  function gaugeColor(v) {
-    if (v >= 90) return 'var(--red)';
-    if (v >= 70) return 'var(--yellow)';
-    return 'var(--green)';
-  }
-  function gaugeClass(v) {
-    if (v >= 90) return 'danger';
-    if (v >= 70) return 'warn';
-    return '';
-  }
-
-  // services is always an array from the API
-  const serviceList = Array.isArray(data.services)
-    ? data.services
-    : Object.entries(data.services ?? {}).map(([k, v]) => ({ service: k, status: v, active: v === 'active' || v === true }));
+// ─── Bots tab ─────────────────────────────────────────────────────────────────
+function BotsTab({ bots, botMap, status }) {
+  const allBots = bots?.bots || []
+  const primary = PRIMARY.map(id => ({ id, data: botMap[id] }))
+  const others  = allBots.filter(b => !PRIMARY.includes(b.bot)).map(b => ({ id: b.bot, data: b }))
 
   return (
-    <div>
-      <div className="grid-3 section-gap">
-        {gauges.map((g) => (
-          <div key={g.label} className="card">
-            <div className="card-title">{g.icon}{g.label}</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-              <span className="mono" style={{ fontSize: 28, fontWeight: 700, color: gaugeColor(g.value) }}>
-                {fmt(g.value, 1)}%
-              </span>
-              {g.extra && <span className="dim mono" style={{ fontSize: 11 }}>{g.extra}</span>}
-            </div>
-            <div className="progress-bar">
-              <div className={`progress-fill ${gaugeClass(g.value)}`} style={{ width: `${Math.min(g.value, 100)}%` }} />
-            </div>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">Grid &amp; Strategy Bots</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {primary.map(({ id, data }) => <BotCard key={id} botId={id} data={data} />)}
+        </div>
+      </div>
+
+      {others.length > 0 && (
+        <div>
+          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">Other Bots</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {others.map(({ id, data }) => <BotCard key={id} botId={id} data={data} />)}
           </div>
+        </div>
+      )}
+
+      {/* Enabled bots from config */}
+      {status?.enabled_bots?.length > 0 && (
+        <Card className="p-4">
+          <SLabel>Enabled in orchestrator (settings.yaml)</SLabel>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {status.enabled_bots.map(b => (
+              <Badge key={b} color={PRIMARY.includes(b) ? 'orange' : 'slate'}>
+                {BOT[b]?.label || b}
+              </Badge>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ─── Trades tab ───────────────────────────────────────────────────────────────
+function TradesTab({ trades }) {
+  const [filter, setFilter] = useState('all')
+  const all = trades?.trades || []
+  const bots = [...new Set(all.map(t => t.bot))].sort()
+  const shown = filter === 'all' ? all : all.filter(t => t.bot === filter)
+
+  return (
+    <div className="space-y-4">
+      {/* Filter */}
+      <div className="flex gap-2 flex-wrap">
+        <button
+          onClick={() => setFilter('all')}
+          className={`px-3 py-1 rounded text-xs font-mono border transition-colors ${filter === 'all' ? 'bg-brand border-brand text-white' : 'border-surface-line text-slate-400 hover:border-slate-600'}`}
+        >all</button>
+        {bots.map(b => (
+          <button
+            key={b}
+            onClick={() => setFilter(b)}
+            className={`px-3 py-1 rounded text-xs font-mono border transition-colors ${filter === b ? 'border-brand text-brand bg-orange-950/30' : 'border-surface-line text-slate-400 hover:border-slate-600'}`}
+          >
+            {BOT[b]?.label || b}
+          </button>
         ))}
       </div>
 
-      {data.load_avg && (
-        <div className="card section-gap">
-          <div className="card-title"><Activity size={14} />Load Average</div>
-          <div style={{ display: 'flex', gap: 32 }}>
-            {(Array.isArray(data.load_avg) ? data.load_avg : [data.load_avg]).map((v, i) => (
-              <div key={i}>
-                <div className="dim mono" style={{ fontSize: 10 }}>{['1m', '5m', '15m'][i] ?? `${i}`}</div>
-                <div className="mono" style={{ fontSize: 22, color: 'var(--green)' }}>{fmt(Number(v), 2)}</div>
-              </div>
-            ))}
-          </div>
+      {/* Table */}
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[700px]">
+            <thead>
+              <tr className="border-b border-surface-line text-[10px] font-mono text-slate-500 uppercase tracking-widest">
+                <th className="py-2 px-3 text-left">ID</th>
+                <th className="py-2 px-3 text-left">Timestamp</th>
+                <th className="py-2 px-3 text-left">Bot</th>
+                <th className="py-2 px-3 text-left">Pair</th>
+                <th className="py-2 px-3 text-left">Side</th>
+                <th className="py-2 px-3 text-right">Size</th>
+                <th className="py-2 px-3 text-right">P&L</th>
+                <th className="py-2 px-3 text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.length === 0 ? (
+                <tr><td colSpan={8} className="py-12 text-center text-slate-600 font-mono text-sm">No trades</td></tr>
+              ) : (
+                shown.map(t => <TradeRow key={t.id} t={t} />)
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
-
-      <div className="card">
-        <div className="card-title"><Server size={14} />Services</div>
-        {serviceList.length === 0 ? (
-          <div className="empty-state">Sem dados de serviços</div>
-        ) : (
-          serviceList.map((svc) => {
-            const name   = svc.service ?? svc.name ?? '?';
-            const isUp   = svc.active ?? (svc.status === 'active' || svc.status === 'running');
-            const status = svc.status ?? (isUp ? 'active' : 'down');
-            const since  = svc.uptime_since ?? '';
-            return (
-              <div key={name} className="service-item">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {isUp
-                    ? <CheckCircle size={14} style={{ color: 'var(--green)' }} />
-                    : <XCircle    size={14} style={{ color: status === 'failed' ? 'var(--red)' : 'var(--yellow)' }} />}
-                  <div>
-                    <div className="service-name">{name}</div>
-                    {since && <div className="dim mono" style={{ fontSize: 10 }}>{since}</div>}
-                  </div>
-                </div>
-                <span className={`badge ${isUp ? 'badge-green' : status === 'failed' ? 'badge-red' : 'badge-yellow'}`}>
-                  {status}
-                </span>
-              </div>
-            );
-          })
-        )}
-      </div>
+        <div className="px-3 py-2 border-t border-surface-line text-[10px] font-mono text-slate-600">
+          {shown.length} trades {filter !== 'all' ? `(${filter})` : '(all bots)'}
+        </div>
+      </Card>
     </div>
-  );
+  )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ROOT APP
-// ─────────────────────────────────────────────────────────────────────────────
-const TABS = [
-  { id: 'overview', label: 'Overview',  icon: BarChart2  },
-  { id: 'ibkr',     label: 'IBKR',      icon: TrendingUp },
-  { id: 'sniper',   label: 'Sniper',    icon: Target     },
-  { id: 'grid',     label: 'Grid',      icon: Grid       },
-  { id: 'funding',  label: 'Funding',   icon: DollarSign },
-  { id: 'logs',     label: 'Logs',      icon: FileText   },
-  { id: 'system',   label: 'System',    icon: Server     },
-];
+// ─── VPS tab ──────────────────────────────────────────────────────────────────
+function VPSTab({ vps, status }) {
+  if (!vps) return <div className="text-slate-500 font-mono text-sm py-8 text-center">Carregando métricas...</div>
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState('overview');
-  const [loading, setLoading]     = useState(false);
-  const [online, setOnline]       = useState(null);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [errors, setErrors]       = useState({});
-
-  const [pnl,     setPnl]     = useState(null);
-  const [ibkr,    setIbkr]    = useState(null);
-  const [sniper,  setSniper]  = useState(null);
-  const [grid,    setGrid]    = useState(null);
-  const [funding, setFunding] = useState(null);
-  const [system,  setSystem]  = useState(null);
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
-    const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR] = await Promise.allSettled([
-      apiFetch('/api/pnl'),
-      apiFetch('/api/ibkr'),
-      apiFetch('/api/sniper'),
-      apiFetch('/api/grid'),
-      apiFetch('/api/funding'),
-      apiFetch('/api/system'),
-    ]);
-    if (pnlR.status     === 'fulfilled') setPnl(pnlR.value);       else errs.pnl = pnlR.reason?.message;
-    if (ibkrR.status    === 'fulfilled') setIbkr(ibkrR.value);     else errs.ibkr = ibkrR.reason?.message;
-    if (sniperR.status  === 'fulfilled') setSniper(sniperR.value); else errs.sniper = sniperR.reason?.message;
-    if (gridR.status    === 'fulfilled') setGrid(gridR.value);     else errs.grid = gridR.reason?.message;
-    if (fundingR.status === 'fulfilled') setFunding(fundingR.value); else errs.funding = fundingR.reason?.message;
-    if (systemR.status  === 'fulfilled') setSystem(systemR.value); else errs.system = systemR.reason?.message;
-    setErrors(errs);
-    setOnline(Object.keys(errs).length < 6);
-    setLastUpdate(new Date().toLocaleTimeString());
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    fetchAll();
-    const id = setInterval(fetchAll, 30_000);
-    return () => clearInterval(id);
-  }, [fetchAll]);
+  const services = vps.services || {}
+  const load = vps.load_avg || ['—', '—', '—']
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="header-logo">
-          <div className="header-logo-icon">
-            <Activity size={18} />
+    <div className="space-y-6">
+      {/* Gauges */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <VpsGauge label="CPU" pct={vps.cpu_pct} used={vps.cpu_pct?.toFixed(1)} total={100} unit="%" />
+        <VpsGauge label="RAM" pct={vps.mem_pct} used={vps.mem_used_mb} total={vps.mem_total_mb} unit=" MB" />
+        <VpsGauge label="Disk" pct={vps.disk?.pct} used={vps.disk?.used} total={vps.disk?.size} />
+        <Card className="p-4">
+          <SLabel>Uptime</SLabel>
+          <div className="text-2xl font-mono font-bold text-white mb-1">{vps.uptime_human}</div>
+          <div className="text-[10px] font-mono text-slate-500">
+            Load: {load[0]} {load[1]} {load[2]}
           </div>
-          <div>
-            <div className="header-title">TRADER DASHBOARD</div>
-            <div className="header-subtitle">Algorithmic Trading Monitor</div>
+        </Card>
+      </div>
+
+      {/* Services */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Card className="p-4">
+          <SLabel>Services</SLabel>
+          <div className="mt-2">
+            {Object.entries(services).map(([name, st]) => (
+              <SvcRow key={name} name={name} status={st} />
+            ))}
           </div>
-        </div>
-        <div className="header-right">
-          {lastUpdate && (
-            <div className="status-pill">
-              <Clock size={11} />
-              {lastUpdate}
+        </Card>
+
+        <Card className="p-4">
+          <SLabel>System Info</SLabel>
+          <div className="mt-2 space-y-2 font-mono text-xs">
+            <div className="flex justify-between border-b border-surface-line py-1.5">
+              <span className="text-slate-500">RAM Total</span>
+              <span className="text-white tabular">{vps.mem_total_mb} MB</span>
             </div>
-          )}
-          <div className="status-pill">
-            <div className={`status-dot ${online === false ? 'offline' : ''}`} />
-            {online === null ? 'Connecting…' : online ? 'Online' : 'Parcial'}
+            <div className="flex justify-between border-b border-surface-line py-1.5">
+              <span className="text-slate-500">RAM Used</span>
+              <span className="text-white tabular">{vps.mem_used_mb} MB</span>
+            </div>
+            <div className="flex justify-between border-b border-surface-line py-1.5">
+              <span className="text-slate-500">RAM Free</span>
+              <span className="text-white tabular">{vps.mem_avail_mb} MB</span>
+            </div>
+            <div className="flex justify-between border-b border-surface-line py-1.5">
+              <span className="text-slate-500">Disk Size</span>
+              <span className="text-white tabular">{vps.disk?.size}</span>
+            </div>
+            <div className="flex justify-between border-b border-surface-line py-1.5">
+              <span className="text-slate-500">Disk Used</span>
+              <span className="text-white tabular">{vps.disk?.used} ({fPct(vps.disk?.pct)})</span>
+            </div>
+            <div className="flex justify-between py-1.5">
+              <span className="text-slate-500">DRY_RUN</span>
+              <Badge color={status?.dry_run ? 'amber' : 'red'}>{String(status?.dry_run ?? true)}</Badge>
+            </div>
           </div>
-          <button className={`refresh-btn ${loading ? 'spinning' : ''}`} onClick={fetchAll}>
-            <RefreshCw size={12} />Refresh
-          </button>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [tab, setTab] = useState('overview')
+  const { status, bots, botMap, trades, vps, loading, err, refresh, lastRefresh } = useData()
+  const [spinning, setSpinning] = useState(false)
+
+  async function handleRefresh() {
+    setSpinning(true)
+    await refresh()
+    setTimeout(() => setSpinning(false), 600)
+  }
+
+  const dryRun = status?.dry_run ?? true
+
+  return (
+    <div className="min-h-screen bg-surface-900 font-sans">
+      {/* ── Top bar ── */}
+      <header className="sticky top-0 z-50 bg-surface-900/95 backdrop-blur border-b border-surface-line">
+        <div className="max-w-screen-2xl mx-auto px-4 h-12 flex items-center justify-between gap-3">
+          {/* Brand */}
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-5 h-5 rounded bg-brand flex items-center justify-center">
+              <Activity size={11} className="text-white" />
+            </div>
+            <span className="text-sm font-bold text-white tracking-wide hidden sm:block">TRADER</span>
+            <span className="text-sm font-bold text-brand tracking-wide hidden sm:block">DASHBOARD</span>
+          </div>
+
+          {/* Tabs — horizontal scroll on mobile */}
+          <nav className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
+            {TABS.map(t => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded whitespace-nowrap transition-colors ${
+                  tab === t.id
+                    ? 'bg-brand/15 text-brand border border-brand/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-surface-600'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+
+          {/* Right controls */}
+          <div className="flex items-center gap-2 shrink-0">
+            {dryRun && <Badge color="amber">DRY RUN</Badge>}
+            {status?.crypto_bsc && (
+              <div className="hidden sm:flex items-center gap-1">
+                <StatusDot active={status.crypto_bsc === 'active'} />
+                <span className="text-[10px] font-mono text-slate-500">bsc</span>
+              </div>
+            )}
+            <button
+              onClick={handleRefresh}
+              className="p-1.5 rounded hover:bg-surface-600 transition-colors text-slate-400 hover:text-slate-200"
+              title="Refresh"
+            >
+              <RefreshCw size={14} className={spinning ? 'animate-spin' : ''} />
+            </button>
+            {lastRefresh && (
+              <span className="text-[10px] font-mono text-slate-600 hidden md:block tabular">
+                {lastRefresh.toLocaleTimeString('pt-PT')}
+              </span>
+            )}
+          </div>
         </div>
       </header>
 
-      <nav className="tabs">
-        {TABS.map((t) => {
-          const Icon  = t.icon;
-          const hasErr = errors[t.id];
-          return (
-            <button
-              key={t.id}
-              className={`tab ${activeTab === t.id ? 'active' : ''}`}
-              onClick={() => setActiveTab(t.id)}
-            >
-              <Icon size={14} />
-              {t.label}
-              {hasErr && <span className="tab-badge" style={{ background: 'var(--red)' }}>!</span>}
-            </button>
-          );
-        })}
-      </nav>
+      {/* ── Main ── */}
+      <main className="max-w-screen-2xl mx-auto px-4 py-5">
+        {loading && (
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <Spinner size={28} />
+            <span className="text-slate-500 font-mono text-sm">Connecting to API…</span>
+          </div>
+        )}
 
-      <main className="content" key={activeTab}>
-        {activeTab === 'overview' && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} />}
-        {activeTab === 'ibkr'     && (errors.ibkr    ? <ErrBox msg={errors.ibkr}    /> : <IBKRTab    data={ibkr}    />)}
-        {activeTab === 'sniper'   && (errors.sniper  ? <ErrBox msg={errors.sniper}  /> : <SniperTab  data={sniper}  />)}
-        {activeTab === 'grid'     && (errors.grid    ? <ErrBox msg={errors.grid}    /> : <GridTab    data={grid}    />)}
-        {activeTab === 'funding'  && (errors.funding ? <ErrBox msg={errors.funding} /> : <FundingTab data={funding} />)}
-        {activeTab === 'logs'     && <LogsTab />}
-        {activeTab === 'system'   && (errors.system  ? <ErrBox msg={errors.system}  /> : <SystemTab  data={system}  />)}
+        {!loading && err && (
+          <div className="flex items-center gap-3 px-4 py-3 bg-loss-muted border border-loss/30 rounded-lg text-loss text-sm">
+            <XCircle size={16} className="shrink-0" />
+            <div>
+              <span className="font-medium">API Error: </span>{err}
+              <button onClick={handleRefresh} className="ml-3 underline text-xs">retry</button>
+            </div>
+          </div>
+        )}
+
+        {!loading && !err && (
+          <>
+            {tab === 'overview' && <OverviewTab bots={bots} botMap={botMap} status={status} vps={vps} />}
+            {tab === 'bots'     && <BotsTab bots={bots} botMap={botMap} status={status} />}
+            {tab === 'trades'   && <TradesTab trades={trades} />}
+            {tab === 'vps'      && <VPSTab vps={vps} status={status} />}
+          </>
+        )}
       </main>
+
+      {/* ── Footer ── */}
+      <footer className="border-t border-surface-line mt-12 px-4 py-3 max-w-screen-2xl mx-auto flex items-center justify-between text-[10px] font-mono text-slate-700">
+        <span>crypto_bsc · BSC Mainnet · chain_id 56</span>
+        <span className="tabular">{new Date().toISOString().slice(0, 10)}</span>
+      </footer>
     </div>
-  );
+  )
 }
