@@ -188,15 +188,23 @@ bots:
     poll_seconds: 30          # intervalo de gestão de posições (s)
     target_tokens: []         # tokens fixos adicionais (opcional)
 
+    # Filtros de segurança aplicados em CADA entrada (consider())
+    # Independentes do auto-discovery — protegem mesmo contra tokens manuais
+    min_pool_age_minutes: 10      # pool deve existir há pelo menos 10 min
+    max_buy_tax_pct: 5            # rejeitar se buy tax > 5%
+    max_sell_tax_pct: 5           # rejeitar se sell tax > 5%
+    max_top_holder_pct: 50        # rejeitar se qualquer holder tiver > 50% do supply
+    entry_require_goplus: true    # rejeitar se GoPlus não tiver dados (tokens sem histórico)
+
     auto_discovery:
       enabled: true
       scan_interval_seconds: 300  # re-scan a cada 5 min via GeckoTerminal
       min_volume_usd: 100000      # volume 24h > $100k
-      min_liquidity_usd: 50000    # liquidez (TVL) > $50k
-      max_age_days: 7             # pool criado há menos de 7 dias
+      min_liquidity_usd: 100000   # liquidez (TVL) > $100k (aumentado de $50k)
+      max_age_days: 3             # pool criado há menos de 3 dias (reduzido de 7)
       max_tokens: 10              # máx. tokens em carteira simultaneamente
       safety_check: true          # verificar honeypot/tax/rug via GoPlus
-      safety_require_goplus: false  # false=aceitar tokens sem dados GoPlus (muito novos)
+      safety_require_goplus: true # true=rejeitar tokens sem dados GoPlus (rug pulls são novos)
       blacklist: []               # endereços a ignorar sempre
 
   solana_sniper:

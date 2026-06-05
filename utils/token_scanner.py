@@ -85,20 +85,20 @@ def _goplus_check(addresses: list[str]) -> dict[str, dict]:
 def _is_safe(sec: dict, require_data: bool = False) -> bool:
     """True se o token passa nos checks de segurança GoPlus.
 
-    Se ``require_data=False`` (default) tokens sem dados GoPlus passam com
-    aviso — tokens muito novos ainda não estão indexados. Se ``True``, a
-    ausência de dados é tratada como rejeição.
+    Se ``require_data=False`` tokens sem dados GoPlus passam com aviso.
+    Se ``True``, ausência de dados é tratada como rejeição.
     """
     if not sec:
-        return not require_data  # sem dados: passa (com aviso) ou rejeita
+        return not require_data
     if sec.get("is_honeypot") == "1":
         return False
     if sec.get("is_open_source") == "0":
         return False
     try:
-        if float(sec.get("buy_tax") or 0) > 0.10:
+        # Limiar apertado: 5% em vez de 10% (GoPlus devolve 0.0–1.0)
+        if float(sec.get("buy_tax") or 0) > 0.05:
             return False
-        if float(sec.get("sell_tax") or 0) > 0.10:
+        if float(sec.get("sell_tax") or 0) > 0.05:
             return False
     except (ValueError, TypeError):
         pass
@@ -107,6 +107,15 @@ def _is_safe(sec: dict, require_data: bool = False) -> bool:
             return False
         if float(sec.get("creator_percent") or 0) > 0.20:
             return False
+    except (ValueError, TypeError):
+        pass
+    # Verificar concentração dos top holders (GoPlus devolve lista de holders)
+    try:
+        holders = sec.get("holders") or []
+        if holders:
+            top_pct = max(float(h.get("percent") or 0) for h in holders)
+            if top_pct > 0.50:  # top holder com > 50% é sinal de rug
+                return False
     except (ValueError, TypeError):
         pass
     return True

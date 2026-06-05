@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
+
+import requests
 
 from core.dex import Dex
 from core.risk_manager import RiskManager
@@ -25,6 +28,11 @@ from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
 logger = get_logger(__name__)
+
+_GOPLUS_TOKEN_URL      = "https://api.gopluslabs.io/api/v1/token_security/56"
+_HONEYPOT_IS_URL       = "https://api.honeypot.is/v2/IsHoneypot"
+_GECKO_TOKEN_POOLS_URL = "https://api.geckoterminal.com/api/v2/networks/bsc/tokens/{addr}/pools"
+_SAFETY_TIMEOUT = 10
 
 
 @dataclass
@@ -77,6 +85,126 @@ class SniperBot:
             return "stop_loss"
         return None
 
+    # ----------------------------------------------------------- safety utils
+    def _resolve_address(self, token: str) -> str:
+        """Devolve endereço lowercase a partir de símbolo ou endereço raw."""
+        toks = self.settings.get("tokens", {})
+        if token in toks:
+            return toks[token]["address"].lower()
+        return token.lower()
+
+    def _safety_check(self, token: str) -> tuple[bool, str]:
+        """Três camadas de segurança antes de entrar: GoPlus + honeypot.is + idade do pool.
+
+        Devolve (ok, motivo). Se ok=False, o motivo descreve o filtro que falhou.
+        """
+        cfg = self.settings["bots"]["sniper"]
+        addr = self._resolve_address(token)
+        max_buy_tax  = float(cfg.get("max_buy_tax_pct",  5))
+        max_sell_tax = float(cfg.get("max_sell_tax_pct", 5))
+        max_top_holder = float(cfg.get("max_top_holder_pct", 50)) / 100  # 0–1
+        require_goplus = bool(cfg.get("entry_require_goplus", True))
+
+        # --- 1. GoPlus token security ---
+        sec: dict = {}
+        try:
+            r = requests.get(
+                _GOPLUS_TOKEN_URL,
+                params={"contract_addresses": addr},
+                timeout=_SAFETY_TIMEOUT,
+            )
+            r.raise_for_status()
+            sec = r.json().get("result", {}).get(addr, {})
+        except Exception as exc:
+            logger.warning("GoPlus falhou para %s: %s", token, exc)
+
+        if not sec:
+            if require_goplus:
+                return False, "GoPlus: sem dados — token não indexado (entry_require_goplus=true)"
+            logger.warning("GoPlus sem dados para %s — aceite com aviso", token)
+        else:
+            if sec.get("is_honeypot") == "1":
+                return False, "GoPlus: honeypot detectado"
+            if sec.get("is_open_source") == "0":
+                return False, "GoPlus: contrato não é open-source"
+            try:
+                buy_tax  = float(sec.get("buy_tax")  or 0) * 100  # GoPlus: 0.0–1.0
+                sell_tax = float(sec.get("sell_tax") or 0) * 100
+                if buy_tax > max_buy_tax:
+                    return False, f"GoPlus: buy_tax {buy_tax:.1f}% > {max_buy_tax:.0f}%"
+                if sell_tax > max_sell_tax:
+                    return False, f"GoPlus: sell_tax {sell_tax:.1f}% > {max_sell_tax:.0f}%"
+            except (ValueError, TypeError):
+                pass
+            try:
+                holders = sec.get("holders") or []
+                if holders:
+                    top_pct = max(float(h.get("percent") or 0) for h in holders)
+                    if top_pct > max_top_holder:
+                        return False, (
+                            f"GoPlus: top holder {top_pct:.1%} > {max_top_holder:.0%} máximo"
+                        )
+                owner_pct   = float(sec.get("owner_percent")   or 0)
+                creator_pct = float(sec.get("creator_percent") or 0)
+                if owner_pct > max_top_holder or creator_pct > max_top_holder:
+                    worst = max(owner_pct, creator_pct)
+                    return False, f"GoPlus: owner/creator detêm {worst:.1%} do supply"
+            except (ValueError, TypeError):
+                pass
+
+        # --- 2. Honeypot.is (segunda opinião independente) ---
+        try:
+            r = requests.get(
+                _HONEYPOT_IS_URL,
+                params={"address": addr},
+                timeout=_SAFETY_TIMEOUT,
+            )
+            r.raise_for_status()
+            hp = r.json()
+            if hp.get("honeypotResult", {}).get("isHoneypot"):
+                return False, "honeypot.is: honeypot confirmado"
+            sim = hp.get("simulationResult", {})
+            buy_tax  = float(sim.get("buyTax")  or 0)  # honeypot.is: já em %
+            sell_tax = float(sim.get("sellTax") or 0)
+            if buy_tax > max_buy_tax:
+                return False, f"honeypot.is: buy_tax {buy_tax:.1f}% > {max_buy_tax:.0f}%"
+            if sell_tax > max_sell_tax:
+                return False, f"honeypot.is: sell_tax {sell_tax:.1f}% > {max_sell_tax:.0f}%"
+        except Exception as exc:
+            logger.warning("honeypot.is falhou para %s: %s — ignorado", token, exc)
+
+        # --- 3. Idade mínima do pool (protecção contra rug instantâneo) ---
+        min_age_minutes = int(cfg.get("min_pool_age_minutes", 10))
+        if min_age_minutes > 0:
+            try:
+                r = requests.get(
+                    _GECKO_TOKEN_POOLS_URL.format(addr=addr),
+                    headers={"Accept": "application/json"},
+                    timeout=_SAFETY_TIMEOUT,
+                )
+                if r.status_code == 200:
+                    pools = r.json().get("data", [])
+                    if pools:
+                        created_str = pools[0].get("attributes", {}).get("pool_created_at", "")
+                        if created_str:
+                            created_at = datetime.fromisoformat(
+                                created_str.replace("Z", "+00:00")
+                            )
+                            age_min = (
+                                datetime.now(timezone.utc) - created_at
+                            ).total_seconds() / 60
+                            if age_min < min_age_minutes:
+                                return False, (
+                                    f"pool demasiado nova: {age_min:.1f}min "
+                                    f"< {min_age_minutes}min mínimo"
+                                )
+            except Exception as exc:
+                logger.warning(
+                    "Verificação de idade do pool falhou para %s: %s — ignorado", token, exc
+                )
+
+        return True, "ok"
+
     # -------------------------------------------------------------- entrada
     def consider(self, token: str) -> dict:
         """Avalia e, se passar, executa a entrada num token."""
@@ -87,6 +215,11 @@ class SniperBot:
         impact = self.dex.price_impact_bps(self.quote, token, self.buy_amount)
         if impact > self.max_impact_bps:
             return {"action": "skip", "reason": f"impacto {impact:.0f}bps > {self.max_impact_bps:.0f}bps"}
+
+        safe, reason = self._safety_check(token)
+        if not safe:
+            logger.warning("SNIPE REJEITADO %s — %s", token, reason)
+            return {"action": "skip", "reason": f"safety: {reason}"}
 
         decision = self.risk.check_size(self._size_usd())
         if not decision.allowed:

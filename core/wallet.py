@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from eth_account import Account
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+from web3.middleware import ExtraDataToPOAMiddleware
 
 from utils.config import get_env, get_settings
 
@@ -67,7 +67,7 @@ class Wallet:
             try:
                 w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 15}))
                 # BSC é Proof-of-Authority -> precisa do middleware POA.
-                w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+                w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
                 if w3.is_connected():
                     logger.info("Ligado ao RPC BSC: %s", url)
                     return w3
