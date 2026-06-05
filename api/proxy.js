@@ -9,7 +9,7 @@
  *   fetch('/api/proxy?path=' + encodeURIComponent('/api/bots'))
  */
 
-const VPS    = 'http://178.104.133.71:5000'
+const VPS    = 'http://178.104.133.71:80'
 const TOKEN  = 'Bearer JPxK9m2026TraderB0t!'
 const TIMEOUT = 15_000   // ms
 

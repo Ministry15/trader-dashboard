@@ -8,7 +8,7 @@ export default defineConfig({
     proxy: {
       // Dev: emula o proxy serverless — extrai ?path= e faz forward para o VPS
       '/api/proxy': {
-        target: 'http://178.104.133.71:5000',
+        target: 'http://178.104.133.71:80',
         changeOrigin: true,
         configure(proxy) {
           proxy.on('proxyReq', (proxyReq, req) => {
