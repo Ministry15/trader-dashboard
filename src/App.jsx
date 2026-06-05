@@ -11,12 +11,11 @@ import {
 } from 'lucide-react'
 
 // ─── API ─────────────────────────────────────────────────────────────────────
-const API = '/api-proxy'
-const HDR = { Authorization: 'Bearer JPxK9m2026TraderB0t!', 'Content-Type': 'application/json' }
+// Usa o Vercel Serverless Proxy (api/proxy.js) — o token fica server-side.
 const REFRESH = 30_000
 
 async function apiFetch(path) {
-  const r = await fetch(API + path, { headers: HDR })
+  const r = await fetch('/api/proxy?path=' + encodeURIComponent(path))
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return r.json()
 }
