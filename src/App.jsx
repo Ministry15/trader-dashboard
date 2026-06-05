@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  AreaChart, Area, BarChart, Bar,
+  BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts';
 import {
   Activity, TrendingUp, TrendingDown, Zap, Grid, DollarSign,
   Server, FileText, RefreshCw, AlertTriangle,
-  CheckCircle, XCircle, Clock, Cpu, HardDrive, MemoryStick,
-  BarChart2, Target, Shield
+  CheckCircle, XCircle, Cpu, HardDrive, MemoryStick,
+  BarChart2, Target
 } from 'lucide-react';
 
-// ─── API client ──────────────────────────────────────────────────────────────
+// ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = '/api-proxy';
 const HEADERS = { 'x-api-key': 'JPxK9m2026TraderB0t!', 'Content-Type': 'application/json' };
 
@@ -20,66 +20,55 @@ async function apiFetch(endpoint) {
   return res.json();
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const fmt = (n, decimals = 2) =>
-  n == null ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-
-const fmtUSD = (n) =>
-  n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-const fmtBNB = (n) =>
-  n == null ? '—' : (n < 0 ? '-' : '') + Math.abs(Number(n)).toFixed(6) + ' BNB';
-
-const pct = (n) => n == null ? '—' : `${Number(n).toFixed(2)}%`;
-
-const clr = (n) => n == null ? '' : Number(n) >= 0 ? 'positive' : 'negative';
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const fmt    = (n, d = 2) => n == null ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtUSD = n => n == null ? '—' : (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtBNB = n => n == null ? '—' : (n < 0 ? '-' : '') + Math.abs(Number(n)).toFixed(6) + ' BNB';
+const pct    = n => n == null ? '—' : `${Number(n).toFixed(2)}%`;
+const clr    = n => n == null ? '' : Number(n) >= 0 ? 'pos' : 'neg';
 
 function Loader() {
-  return (
-    <div className="loading-state">
-      <RefreshCw size={18} />
-      Loading…
-    </div>
-  );
+  return <div className="loader"><span className="blink">_</span> loading...</div>;
 }
 
-function ErrBox({ msg }) {
-  return <div className="error-state"><AlertTriangle size={14} style={{ marginRight: 6 }} />{msg}</div>;
+function Err({ msg }) {
+  return <div className="err-box">[ERROR] {msg}</div>;
 }
 
-function CustomTooltip({ active, payload, label }) {
+function ChartTip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div style={{
-      background: '#12122a', border: '1px solid #1a1a33', borderRadius: 8,
-      padding: '10px 14px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12
-    }}>
-      <div style={{ color: '#7070a0', marginBottom: 4 }}>{label}</div>
-      {payload.map((p) => (
-        <div key={p.dataKey} style={{ color: p.color || '#00ff88' }}>
-          {p.name}: <strong>{p.value}</strong>
-        </div>
+    <div className="chart-tip">
+      <div className="chart-tip-label">{label}</div>
+      {payload.map(p => (
+        <div key={p.dataKey} style={{ color: p.color }}>{p.name}: {p.value}</div>
       ))}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: OVERVIEW
-// API: { today: {sniper_bnb, sniper_trades, sniper_win_rate, grid_usdt, grid_trades},
-//        history_7d: [{date, sniper_bnb, grid_usdt, ibkr_usd}] }
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── LIVE CLOCK ───────────────────────────────────────────────────────────────
+function LiveClock() {
+  const [time, setTime] = useState(() => new Date().toLocaleTimeString('en-GB'));
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date().toLocaleTimeString('en-GB')), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return <span className="clock">{time}</span>;
+}
+
+// ─── OVERVIEW ─────────────────────────────────────────────────────────────────
 function OverviewTab({ pnl, ibkr, sniper, grid }) {
   if (!pnl) return <Loader />;
 
-  const todayBNB   = pnl.today?.sniper_bnb   ?? 0;
-  const todayUSDT  = pnl.today?.grid_usdt    ?? 0;
-  const totalTrades= (pnl.today?.sniper_trades ?? 0) + (pnl.today?.grid_trades ?? 0);
-  const winRate    = pnl.today?.sniper_win_rate ?? sniper?.win_rate ?? 0;
+  const todayBNB    = pnl.today?.sniper_bnb   ?? 0;
+  const todayUSDT   = pnl.today?.grid_usdt    ?? 0;
+  const totalTrades = (pnl.today?.sniper_trades ?? 0) + (pnl.today?.grid_trades ?? 0);
+  const winRate     = pnl.today?.sniper_win_rate ?? sniper?.win_rate ?? 0;
 
   const history   = pnl.history_7d ?? [];
-  const chartData = history.map((d) => ({
-    day: (d.date ?? '').slice(5),
+  const chartData = history.map(d => ({
+    day:    (d.date ?? '').slice(5),
     sniper: Number(d.sniper_bnb ?? 0),
     grid:   Number(d.grid_usdt  ?? 0),
   }));
@@ -95,95 +84,86 @@ function OverviewTab({ pnl, ibkr, sniper, grid }) {
 
   return (
     <div>
-      <div className="grid-4 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Sniper P&amp;L Today</div>
-          <div className={`stat-value ${todayBNB < 0 ? 'negative' : ''}`} style={{ fontSize: 20 }}>
-            {fmtBNB(todayBNB)}
-          </div>
-          <div className="stat-sub">BSC net</div>
+      <div className="kpi-grid mb">
+        <div className="kpi">
+          <div className="kpi-label">// SNIPER P&amp;L TODAY</div>
+          <div className={`kpi-val ${todayBNB < 0 ? 'neg' : ''}`}>{fmtBNB(todayBNB)}</div>
+          <div className="kpi-sub">BSC NET</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">Grid P&amp;L Today</div>
-          <div className={`stat-value ${todayUSDT < 0 ? 'negative' : ''}`} style={{ fontSize: 20 }}>
-            {fmtUSD(todayUSDT)}
-          </div>
-          <div className="stat-sub">USDT net</div>
+        <div className="kpi">
+          <div className="kpi-label">// GRID P&amp;L TODAY</div>
+          <div className={`kpi-val ${todayUSDT < 0 ? 'neg' : ''}`}>{fmtUSD(todayUSDT)}</div>
+          <div className="kpi-sub">USDT NET</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">Win Rate (Sniper)</div>
-          <div className="stat-value">{pct(winRate)}</div>
-          <div className="stat-sub">today</div>
+        <div className="kpi">
+          <div className="kpi-label">// WIN RATE</div>
+          <div className="kpi-val">{pct(winRate)}</div>
+          <div className="kpi-sub">SNIPER TODAY</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">Total Trades</div>
-          <div className="stat-value neutral">{totalTrades}</div>
-          <div className="stat-sub">sniper + grid hoje</div>
+        <div className="kpi">
+          <div className="kpi-label">// TOTAL TRADES</div>
+          <div className="kpi-val neu">{totalTrades}</div>
+          <div className="kpi-sub">SNIPER + GRID</div>
         </div>
       </div>
 
-      <div className="grid-2 section-gap">
-        <div className="card">
-          <div className="card-title"><TrendingUp size={14} />7-Day P&amp;L History</div>
+      <div className="row2 mb">
+        <div className="panel">
+          <div className="panel-head">7-DAY P&amp;L HISTORY</div>
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1a1a33" />
-                <XAxis dataKey="day" tick={{ fill: '#7070a0', fontSize: 10 }} />
-                <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} />
-                <Tooltip content={<CustomTooltip />} />
-                <ReferenceLine y={0} stroke="#333360" />
-                <Bar dataKey="sniper" name="Sniper BNB" fill="#00ff88" radius={[3,3,0,0]} />
-                <Bar dataKey="grid"   name="Grid USDT"  fill="#4488ff" radius={[3,3,0,0]} />
+              <BarChart data={chartData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="2 4" stroke="#1a1a1a" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
+                <Tooltip content={<ChartTip />} />
+                <ReferenceLine y={0} stroke="#2a2a2a" />
+                <Bar dataKey="sniper" name="Sniper BNB" fill="#00ff88" radius={[2,2,0,0]} />
+                <Bar dataKey="grid"   name="Grid USDT"  fill="#00aaff" radius={[2,2,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="empty-state">Sem histórico</div>
+            <div className="empty">NO DATA</div>
           )}
         </div>
 
-        <div className="card">
-          <div className="card-title"><Activity size={14} />Resumo Semanal</div>
-          <div style={{ marginBottom: 16 }}>
-            <span className={`regime-pill regime-${regimeClass}`}>
-              {regimeClass === 'bull' && <TrendingUp size={12} />}
-              {regimeClass === 'bear' && <TrendingDown size={12} />}
-              {regime}
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <span className="dim mono">Sniper 7d</span>
-              <span className={`mono ${clr(weekSniper)}`}>{fmtBNB(weekSniper)}</span>
+        <div className="panel">
+          <div className="panel-head">WEEKLY SUMMARY</div>
+          <div className="kv-list">
+            <div className="kv">
+              <span className="kv-k">REGIME</span>
+              <span className={`regime-tag regime-${regimeClass}`}>{regime}</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <span className="dim mono">Grid 7d</span>
-              <span className={`mono ${clr(weekGrid)}`}>{fmtUSD(weekGrid)}</span>
+            <div className="kv">
+              <span className="kv-k">SNIPER 7D</span>
+              <span className={clr(weekSniper)}>{fmtBNB(weekSniper)}</span>
+            </div>
+            <div className="kv">
+              <span className="kv-k">GRID 7D</span>
+              <span className={clr(weekGrid)}>{fmtUSD(weekGrid)}</span>
             </div>
             {ibkr?.regime?.vix != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">VIX</span>
-                <span className="mono" style={{ color: ibkr.regime.vix > 25 ? 'var(--yellow)' : 'var(--text)' }}>
-                  {fmt(ibkr.regime.vix)}
-                </span>
+              <div className="kv">
+                <span className="kv-k">VIX</span>
+                <span style={{ color: ibkr.regime.vix > 25 ? 'var(--yellow)' : 'var(--green)' }}>{fmt(ibkr.regime.vix)}</span>
               </div>
             )}
             {ibkr?.regime?.spy != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">SPY</span>
-                <span className="mono">${fmt(ibkr.regime.spy)}</span>
+              <div className="kv">
+                <span className="kv-k">SPY</span>
+                <span>${fmt(ibkr.regime.spy)}</span>
               </div>
             )}
             {ibkr?.signals?.signals_today != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">IBKR Signals Hoje</span>
-                <span className="mono positive">{ibkr.signals.signals_today}</span>
+              <div className="kv">
+                <span className="kv-k">IBKR SIGNALS</span>
+                <span className="pos">{ibkr.signals.signals_today}</span>
               </div>
             )}
             {grid?.active_bots != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span className="dim mono">Grid Bots Activos</span>
-                <span className="mono positive">{grid.active_bots}</span>
+              <div className="kv">
+                <span className="kv-k">GRID BOTS ACTIVE</span>
+                <span className="pos">{grid.active_bots}</span>
               </div>
             )}
           </div>
@@ -193,19 +173,16 @@ function OverviewTab({ pnl, ibkr, sniper, grid }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: IBKR
-// API: { account, mode, regime: {regime, spy, vix}, signals: {signals_today, orders_placed, recent_signals: [{strategy, ticker, direction, price, stop_loss, take_profit, score, timestamp}]} }
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── IBKR ─────────────────────────────────────────────────────────────────────
 function IBKRTab({ data }) {
   if (!data) return <Loader />;
 
-  const regime   = String(data.regime?.regime ?? 'UNKNOWN');
-  const vix      = data.regime?.vix  ?? null;
-  const spy      = data.regime?.spy  ?? null;
-  const signals  = data.signals?.recent_signals ?? [];
-  const sigCount = data.signals?.signals_today  ?? signals.length;
-  const orders   = data.signals?.orders_placed  ?? 0;
+  const regime    = String(data.regime?.regime ?? 'UNKNOWN');
+  const vix       = data.regime?.vix  ?? null;
+  const spy       = data.regime?.spy  ?? null;
+  const signals   = data.signals?.recent_signals ?? [];
+  const sigCount  = data.signals?.signals_today  ?? signals.length;
+  const orders    = data.signals?.orders_placed  ?? 0;
 
   const regimeClass = regime.toLowerCase().includes('bull') ? 'bull'
     : regime.toLowerCase().includes('bear') ? 'bear'
@@ -214,70 +191,64 @@ function IBKRTab({ data }) {
 
   return (
     <div>
-      <div className="grid-4 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Regime</div>
-          <div style={{ marginTop: 10 }}>
-            <span className={`regime-pill regime-${regimeClass}`}>
-              {regimeClass === 'bull' && <TrendingUp size={12} />}
-              {regimeClass === 'bear' && <TrendingDown size={12} />}
-              {regime}
-            </span>
+      <div className="kpi-grid mb">
+        <div className="kpi">
+          <div className="kpi-label">// REGIME</div>
+          <div style={{ marginTop: 8 }}>
+            <span className={`regime-tag regime-${regimeClass}`}>{regime}</span>
           </div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">VIX</div>
-          <div className="stat-value" style={{ fontSize: 22, color: vix > 25 ? 'var(--yellow)' : 'var(--green)' }}>
+        <div className="kpi">
+          <div className="kpi-label">// VIX</div>
+          <div className="kpi-val" style={{ color: vix != null && vix > 25 ? 'var(--yellow)' : 'var(--green)' }}>
             {vix != null ? fmt(vix) : '—'}
           </div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">SPY</div>
-          <div className="stat-value neutral" style={{ fontSize: 22 }}>
-            {spy != null ? `$${fmt(spy)}` : '—'}
-          </div>
+        <div className="kpi">
+          <div className="kpi-label">// SPY</div>
+          <div className="kpi-val neu">{spy != null ? `$${fmt(spy)}` : '—'}</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">Sinais Hoje</div>
-          <div className="stat-value neutral">{sigCount}</div>
-          <div className="stat-sub">{orders} ordens executadas</div>
+        <div className="kpi">
+          <div className="kpi-label">// SIGNALS TODAY</div>
+          <div className="kpi-val neu">{sigCount}</div>
+          <div className="kpi-sub">{orders} ORDERS PLACED</div>
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-title"><Zap size={14} />Sinais Recentes — {data.account} ({data.mode})</div>
+      <div className="panel">
+        <div className="panel-head">RECENT SIGNALS — {data.account} ({data.mode})</div>
         {signals.length === 0 ? (
-          <div className="empty-state">Sem sinais recentes</div>
+          <div className="empty">NO RECENT SIGNALS</div>
         ) : (
-          <div className="table-wrap">
+          <div className="tbl-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Ticker</th>
-                  <th>Direção</th>
-                  <th>Preço</th>
-                  <th>Stop Loss</th>
-                  <th>Take Profit</th>
+                  <th>Dir</th>
+                  <th>Price</th>
+                  <th>Stop</th>
+                  <th>TP</th>
                   <th>Score</th>
-                  <th>Estratégia</th>
-                  <th>Timestamp</th>
+                  <th>Strategy</th>
+                  <th>Time</th>
                 </tr>
               </thead>
               <tbody>
                 {signals.map((s, i) => (
                   <tr key={i}>
-                    <td style={{ fontWeight: 700 }}>{s.ticker ?? '—'}</td>
+                    <td style={{ color: 'var(--green)', fontWeight: 700 }}>{s.ticker ?? '—'}</td>
                     <td>
-                      <span className={`badge ${(s.direction ?? '').toLowerCase() === 'long' ? 'badge-green' : 'badge-red'}`}>
+                      <span className={`badge ${(s.direction ?? '').toLowerCase() === 'long' ? 'bg' : 'br'}`}>
                         {s.direction ?? '—'}
                       </span>
                     </td>
-                    <td className="mono">{s.price   != null ? `$${fmt(s.price,   2)}` : '—'}</td>
-                    <td className="mono negative">{s.stop_loss   != null ? `$${fmt(s.stop_loss,   2)}` : '—'}</td>
-                    <td className="mono positive">{s.take_profit != null ? `$${fmt(s.take_profit, 2)}` : '—'}</td>
+                    <td>{s.price != null ? `$${fmt(s.price)}` : '—'}</td>
+                    <td className="neg">{s.stop_loss   != null ? `$${fmt(s.stop_loss)}` : '—'}</td>
+                    <td className="pos">{s.take_profit != null ? `$${fmt(s.take_profit)}` : '—'}</td>
                     <td style={{ color: 'var(--blue)' }}>{s.score ?? '—'}</td>
                     <td className="dim">{s.strategy ?? '—'}</td>
-                    <td className="dim" style={{ fontSize: 11 }}>{s.timestamp ?? '—'}</td>
+                    <td className="dim" style={{ fontSize: 10 }}>{s.timestamp ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -289,24 +260,19 @@ function IBKRTab({ data }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: SNIPER
-// API: { total_pnl_bnb, wins, losses, win_rate, total_trades,
-//        recent_trades: [{type, side, token, pnl, timestamp}],
-//        pnl_history: [{date, pnl_bnb, trades, win_rate}] }
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── SNIPER ───────────────────────────────────────────────────────────────────
 function SniperTab({ data }) {
   if (!data) return <Loader />;
 
-  const trades    = data.recent_trades   ?? [];
-  const history   = data.pnl_history     ?? [];
-  const totalBNB  = data.total_pnl_bnb   ?? 0;
-  const totalUSDT = data.total_pnl_usdt  ?? 0;
-  const winRate   = data.win_rate        ?? 0;
-  const wins      = data.wins            ?? 0;
-  const losses    = data.losses          ?? 0;
+  const trades   = data.recent_trades  ?? [];
+  const history  = data.pnl_history    ?? [];
+  const totalBNB = data.total_pnl_bnb  ?? 0;
+  const totalUSD = data.total_pnl_usdt ?? 0;
+  const winRate  = data.win_rate       ?? 0;
+  const wins     = data.wins           ?? 0;
+  const losses   = data.losses         ?? 0;
 
-  const chartData = history.map((d) => ({
+  const chartData = history.map(d => ({
     day:  (d.date ?? '').slice(5),
     bnb:  Number(d.pnl_bnb  ?? 0),
     usdt: Number(d.pnl_usdt ?? 0),
@@ -314,81 +280,75 @@ function SniperTab({ data }) {
 
   return (
     <div>
-      <div className="grid-4 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Win Rate</div>
-          <div className="stat-value">{pct(winRate)}</div>
-          <div className="stat-sub">{wins}W / {losses}L</div>
+      <div className="kpi-grid mb">
+        <div className="kpi">
+          <div className="kpi-label">// WIN RATE</div>
+          <div className="kpi-val">{pct(winRate)}</div>
+          <div className="kpi-sub">{wins}W / {losses}L</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">P&amp;L BNB (7d)</div>
-          <div className={`stat-value ${totalBNB < 0 ? 'negative' : ''}`} style={{ fontSize: 18 }}>
-            {fmtBNB(totalBNB)}
-          </div>
+        <div className="kpi">
+          <div className="kpi-label">// P&amp;L BNB (7D)</div>
+          <div className={`kpi-val ${totalBNB < 0 ? 'neg' : ''}`} style={{ fontSize: 18 }}>{fmtBNB(totalBNB)}</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">P&amp;L USDT (7d)</div>
-          <div className={`stat-value ${totalUSDT < 0 ? 'negative' : ''}`} style={{ fontSize: 18 }}>
-            {fmtUSD(totalUSDT)}
-          </div>
+        <div className="kpi">
+          <div className="kpi-label">// P&amp;L USDT (7D)</div>
+          <div className={`kpi-val ${totalUSD < 0 ? 'neg' : ''}`} style={{ fontSize: 18 }}>{fmtUSD(totalUSD)}</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">Total Trades</div>
-          <div className="stat-value neutral">{data.total_trades ?? 0}</div>
+        <div className="kpi">
+          <div className="kpi-label">// TOTAL TRADES</div>
+          <div className="kpi-val neu">{data.total_trades ?? 0}</div>
         </div>
       </div>
 
       {chartData.length > 0 && (
-        <div className="card section-gap">
-          <div className="card-title"><BarChart2 size={14} />P&amp;L 7 dias</div>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a33" />
-              <XAxis dataKey="day" tick={{ fill: '#7070a0', fontSize: 10 }} />
-              <YAxis tick={{ fill: '#7070a0', fontSize: 10 }} />
-              <Tooltip content={<CustomTooltip />} />
-              <ReferenceLine y={0} stroke="#333360" />
-              <Bar dataKey="bnb"  name="BNB"  fill="#00ff88" radius={[3,3,0,0]} />
-              <Bar dataKey="usdt" name="USDT" fill="#4488ff" radius={[3,3,0,0]} />
+        <div className="panel mb">
+          <div className="panel-head">P&amp;L 7 DAYS</div>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={chartData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="2 4" stroke="#1a1a1a" vertical={false} />
+              <XAxis dataKey="day" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
+              <Tooltip content={<ChartTip />} />
+              <ReferenceLine y={0} stroke="#2a2a2a" />
+              <Bar dataKey="bnb"  name="BNB"  fill="#00ff88" radius={[2,2,0,0]} />
+              <Bar dataKey="usdt" name="USDT" fill="#00aaff" radius={[2,2,0,0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      <div className="card">
-        <div className="card-title"><Target size={14} />Trades Recentes — BSC Sniper</div>
+      <div className="panel">
+        <div className="panel-head">RECENT TRADES — BSC SNIPER</div>
         {trades.length === 0 ? (
-          <div className="empty-state">Sem trades recentes</div>
+          <div className="empty">NO RECENT TRADES</div>
         ) : (
-          <div className="table-wrap">
+          <div className="tbl-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Token</th>
-                  <th>Resultado</th>
+                  <th>Result</th>
                   <th>P&amp;L</th>
-                  <th>Moeda</th>
-                  <th>Timestamp</th>
+                  <th>Currency</th>
+                  <th>Time</th>
                 </tr>
               </thead>
               <tbody>
                 {[...trades].reverse().map((t, i) => (
                   <tr key={i}>
-                    <td style={{ fontWeight: 700, fontSize: 11 }}>{t.token ?? '—'}</td>
+                    <td style={{ color: 'var(--text-sec)', fontWeight: 700, fontSize: 11 }}>{t.token ?? '—'}</td>
                     <td>
-                      <span className={`badge ${t.type === 'TAKE_PROFIT' ? 'badge-green' : 'badge-red'}`}>
+                      <span className={`badge ${t.type === 'TAKE_PROFIT' ? 'bg' : 'br'}`}>
                         {t.type === 'TAKE_PROFIT' ? 'TP' : t.type === 'STOP_LOSS' ? 'SL' : t.type ?? '—'}
                       </span>
                     </td>
-                    <td className={`mono ${clr(t.pnl)}`}>
+                    <td className={clr(t.pnl)}>
                       {t.pnl != null ? (t.pnl >= 0 ? '+' : '') + Number(t.pnl).toFixed(6) : '—'}
                     </td>
                     <td>
-                      <span className={`badge ${t.currency === 'WBNB' ? 'badge-yellow' : 'badge-blue'}`}>
-                        {t.currency ?? '—'}
-                      </span>
+                      <span className={`badge ${t.currency === 'WBNB' ? 'by' : 'bb'}`}>{t.currency ?? '—'}</span>
                     </td>
-                    <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
+                    <td className="dim" style={{ fontSize: 10 }}>{t.timestamp ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -400,66 +360,60 @@ function SniperTab({ data }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: GRID
-// API: { total_pnl, total_trades, recent_trades: [{side, pair, price, pnl, timestamp}],
-//        active_bots, active_grids: [{bot, pair, price, range, levels, lower, upper, status}] }
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── GRID ─────────────────────────────────────────────────────────────────────
 function GridTab({ data }) {
   if (!data) return <Loader />;
 
-  const bots   = data.active_grids ?? [];
+  const bots   = data.active_grids  ?? [];
   const trades = data.recent_trades ?? [];
 
   return (
     <div>
-      <div className="grid-3 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Bots Activos</div>
-          <div className="stat-value neutral">{data.active_bots ?? bots.length}</div>
+      <div className="row3 mb">
+        <div className="kpi">
+          <div className="kpi-label">// ACTIVE BOTS</div>
+          <div className="kpi-val neu">{data.active_bots ?? bots.length}</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">Total P&amp;L</div>
-          <div className={`stat-value ${(data.total_pnl ?? 0) < 0 ? 'negative' : ''}`}>
-            {fmtUSD(data.total_pnl)}
-          </div>
+        <div className="kpi">
+          <div className="kpi-label">// TOTAL P&amp;L</div>
+          <div className={`kpi-val ${(data.total_pnl ?? 0) < 0 ? 'neg' : ''}`}>{fmtUSD(data.total_pnl)}</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">Grid Trades</div>
-          <div className="stat-value neutral">{data.total_trades ?? trades.length}</div>
+        <div className="kpi">
+          <div className="kpi-label">// GRID TRADES</div>
+          <div className="kpi-val neu">{data.total_trades ?? trades.length}</div>
         </div>
       </div>
 
-      <div className="card section-gap">
-        <div className="card-title"><Grid size={14} />Grid Bots Activos</div>
+      <div className="panel mb">
+        <div className="panel-head">ACTIVE GRID BOTS</div>
         {bots.length === 0 ? (
-          <div className="empty-state">Sem bots activos detectados nos logs</div>
+          <div className="empty">NO ACTIVE BOTS</div>
         ) : (
-          <div className="table-wrap">
+          <div className="tbl-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Bot</th>
-                  <th>Par</th>
-                  <th>Preço</th>
+                  <th>Pair</th>
+                  <th>Price</th>
                   <th>Lower</th>
                   <th>Upper</th>
                   <th>Range</th>
-                  <th>Níveis</th>
-                  <th>Estado</th>
+                  <th>Levels</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {bots.map((b, i) => (
                   <tr key={i}>
-                    <td className="dim" style={{ fontSize: 11 }}>{b.bot ?? '—'}</td>
-                    <td style={{ fontWeight: 700 }}>{b.pair ?? '—'}</td>
-                    <td className="mono">{b.price != null ? fmt(b.price, 4) : '—'}</td>
-                    <td className="mono dim">{b.lower != null ? fmt(b.lower, 4) : '—'}</td>
-                    <td className="mono dim">{b.upper != null ? fmt(b.upper, 4) : '—'}</td>
-                    <td className="mono">{b.range ?? '—'}</td>
-                    <td className="mono">{b.levels ?? '—'}</td>
-                    <td><span className="badge badge-yellow">dry_run</span></td>
+                    <td className="dim" style={{ fontSize: 10 }}>{b.bot ?? '—'}</td>
+                    <td style={{ color: 'var(--green)', fontWeight: 700 }}>{b.pair ?? '—'}</td>
+                    <td>{b.price != null ? fmt(b.price, 4) : '—'}</td>
+                    <td className="dim">{b.lower != null ? fmt(b.lower, 4) : '—'}</td>
+                    <td className="dim">{b.upper != null ? fmt(b.upper, 4) : '—'}</td>
+                    <td>{b.range ?? '—'}</td>
+                    <td>{b.levels ?? '—'}</td>
+                    <td><span className="badge by">dry_run</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -469,17 +423,17 @@ function GridTab({ data }) {
       </div>
 
       {trades.length > 0 && (
-        <div className="card">
-          <div className="card-title"><Activity size={14} />Trades Recentes</div>
-          <div className="table-wrap">
+        <div className="panel">
+          <div className="panel-head">RECENT TRADES</div>
+          <div className="tbl-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Par</th>
+                  <th>Pair</th>
                   <th>Side</th>
-                  <th>Preço</th>
+                  <th>Price</th>
                   <th>P&amp;L</th>
-                  <th>Timestamp</th>
+                  <th>Time</th>
                 </tr>
               </thead>
               <tbody>
@@ -487,13 +441,13 @@ function GridTab({ data }) {
                   <tr key={i}>
                     <td style={{ fontWeight: 700 }}>{t.pair ?? '—'}</td>
                     <td>
-                      <span className={`badge ${(t.side ?? '').toLowerCase() === 'buy' ? 'badge-green' : 'badge-red'}`}>
+                      <span className={`badge ${(t.side ?? '').toLowerCase() === 'buy' ? 'bg' : 'br'}`}>
                         {t.side ?? '—'}
                       </span>
                     </td>
-                    <td className="mono">{t.price != null ? fmt(t.price, 4) : '—'}</td>
-                    <td className={`mono ${clr(t.pnl)}`}>{t.pnl != null ? fmtUSD(t.pnl) : 'dry_run'}</td>
-                    <td className="dim" style={{ fontSize: 11 }}>{t.timestamp ?? '—'}</td>
+                    <td>{t.price != null ? fmt(t.price, 4) : '—'}</td>
+                    <td className={clr(t.pnl)}>{t.pnl != null ? fmtUSD(t.pnl) : 'dry_run'}</td>
+                    <td className="dim" style={{ fontSize: 10 }}>{t.timestamp ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -505,11 +459,7 @@ function GridTab({ data }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: FUNDING
-// API: { active_positions, positions: [{symbol, side, size, entry, mark, funding_rate, funding_earned, unrealized_pnl}],
-//        total_earned_usdt }
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── FUNDING ──────────────────────────────────────────────────────────────────
 function FundingTab({ data }) {
   if (!data) return <Loader />;
 
@@ -518,31 +468,31 @@ function FundingTab({ data }) {
 
   return (
     <div>
-      <div className="grid-2 section-gap">
-        <div className="stat-tile">
-          <div className="stat-label">Posições Abertas</div>
-          <div className="stat-value neutral">{data.active_positions ?? positions.length}</div>
+      <div className="row2 mb">
+        <div className="kpi">
+          <div className="kpi-label">// OPEN POSITIONS</div>
+          <div className="kpi-val neu">{data.active_positions ?? positions.length}</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-label">Funding Earned</div>
-          <div className="stat-value">{fmtUSD(totalEarned)}</div>
+        <div className="kpi">
+          <div className="kpi-label">// FUNDING EARNED</div>
+          <div className={`kpi-val ${(totalEarned ?? 0) < 0 ? 'neg' : ''}`}>{fmtUSD(totalEarned)}</div>
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-title"><DollarSign size={14} />Funding Rate Positions</div>
+      <div className="panel">
+        <div className="panel-head">FUNDING RATE POSITIONS</div>
         {positions.length === 0 ? (
-          <div className="empty-state">Sem posições abertas detectadas nos logs</div>
+          <div className="empty">NO OPEN POSITIONS</div>
         ) : (
-          <div className="table-wrap">
+          <div className="tbl-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Symbol</th>
                   <th>Side</th>
-                  <th>Size (USDT/ordem)</th>
-                  <th>Lower</th>
-                  <th>Upper</th>
+                  <th>Size</th>
+                  <th>Entry</th>
+                  <th>Mark</th>
                   <th>Funding Earned</th>
                   <th>Unr. P&amp;L</th>
                 </tr>
@@ -550,17 +500,17 @@ function FundingTab({ data }) {
               <tbody>
                 {positions.map((p, i) => (
                   <tr key={i}>
-                    <td style={{ fontWeight: 700 }}>{p.symbol ?? '—'}</td>
+                    <td style={{ color: 'var(--green)', fontWeight: 700 }}>{p.symbol ?? '—'}</td>
                     <td>
-                      <span className={`badge ${(p.side ?? '').toLowerCase() === 'long' ? 'badge-green' : 'badge-red'}`}>
+                      <span className={`badge ${(p.side ?? '').toLowerCase() === 'long' ? 'bg' : 'br'}`}>
                         {p.side ?? '—'}
                       </span>
                     </td>
-                    <td className="mono">{p.size  != null ? fmtUSD(p.size)  : '—'}</td>
-                    <td className="mono dim">{p.entry != null ? fmt(p.entry, 4) : '—'}</td>
-                    <td className="mono dim">{p.mark  != null ? fmt(p.mark,  4) : '—'}</td>
-                    <td className={`mono ${clr(p.funding_earned)}`}>{fmtUSD(p.funding_earned)}</td>
-                    <td className={`mono ${clr(p.unrealized_pnl)}`}>{fmtUSD(p.unrealized_pnl)}</td>
+                    <td>{p.size  != null ? fmtUSD(p.size)  : '—'}</td>
+                    <td className="dim">{p.entry != null ? fmt(p.entry, 4) : '—'}</td>
+                    <td className="dim">{p.mark  != null ? fmt(p.mark,  4) : '—'}</td>
+                    <td className={clr(p.funding_earned)}>{fmtUSD(p.funding_earned)}</td>
+                    <td className={clr(p.unrealized_pnl)}>{fmtUSD(p.unrealized_pnl)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -572,10 +522,7 @@ function FundingTab({ data }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: LOGS
-// API: { service, count, logs: [{raw: string, level: INFO|WARN|ERROR|DEBUG}] }
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── LOGS ─────────────────────────────────────────────────────────────────────
 const LOG_SERVICES = [
   { label: 'autonomous-trader', value: 'autonomous-trader' },
   { label: 'crypto_bsc',        value: 'crypto_bsc' },
@@ -589,9 +536,9 @@ const LOG_SERVICES = [
 
 function LogsTab() {
   const [service, setService] = useState('autonomous-trader');
-  const [lines, setLines]     = useState([]);
+  const [lines,   setLines]   = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
+  const [error,   setError]   = useState(null);
   const bottomRef = useRef(null);
 
   const fetchLogs = useCallback(async () => {
@@ -599,8 +546,7 @@ function LogsTab() {
     setError(null);
     try {
       const data = await apiFetch(`/api/logs/${service}`);
-      // logs is array of {raw, level} objects
-      const raw = (data.logs ?? []).map((l) => (typeof l === 'object' ? l.raw : l) ?? '');
+      const raw = (data.logs ?? []).map(l => (typeof l === 'object' ? l.raw : l) ?? '');
       setLines(raw);
     } catch (e) {
       setError(e.message);
@@ -610,10 +556,7 @@ function LogsTab() {
   }, [service]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [lines]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [lines]);
 
   function parseLevel(line) {
     if (/ERROR|CRITICAL|FATAL/i.test(line)) return 'ERROR';
@@ -623,24 +566,22 @@ function LogsTab() {
   }
 
   return (
-    <div className="card">
-      <div className="card-title" style={{ justifyContent: 'space-between' }}>
-        <span><FileText size={14} />Log Viewer</span>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <select className="log-select" value={service} onChange={(e) => setService(e.target.value)}>
-            {LOG_SERVICES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
+    <div className="panel">
+      <div className="log-bar">
+        <div className="panel-head" style={{ margin: 0, padding: 0, border: 'none' }}>LOG VIEWER</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select className="sel" value={service} onChange={e => setService(e.target.value)}>
+            {LOG_SERVICES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
-          <button className={`refresh-btn ${loading ? 'spinning' : ''}`} onClick={fetchLogs}>
-            <RefreshCw size={12} />Refresh
+          <button className={`btn ${loading ? 'spin' : ''}`} onClick={fetchLogs}>
+            <RefreshCw size={11} /> refresh
           </button>
         </div>
       </div>
 
-      {error ? <ErrBox msg={error} /> : (
+      {error ? <Err msg={error} /> : (
         <div className="log-console">
-          {lines.length === 0 && !loading && <span className="dim">Sem logs</span>}
+          {lines.length === 0 && !loading && <span className="dim">~ no logs ~</span>}
           {lines.map((line, i) => {
             const level = parseLevel(line);
             const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\s]*)/);
@@ -661,26 +602,15 @@ function LogsTab() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TAB: SYSTEM
-// API: { services: [{service, status, active, uptime_since}],
-//        cpu_percent, load_avg, memory_used_pct, disk_used_pct (float),
-//        disk_size, disk_used }
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── SYSTEM ───────────────────────────────────────────────────────────────────
 function SystemTab({ data }) {
   if (!data) return <Loader />;
 
-  const cpu    = data.cpu_percent     ?? null;
-  const ram    = data.memory_used_pct ?? null;
-  const disk   = typeof data.disk_used_pct === 'string'
+  const cpu  = data.cpu_percent     ?? null;
+  const ram  = data.memory_used_pct ?? null;
+  const disk = typeof data.disk_used_pct === 'string'
     ? parseFloat(data.disk_used_pct)
     : data.disk_used_pct ?? null;
-
-  const gauges = [
-    { label: 'CPU',  icon: <Cpu size={14} />,         value: cpu,  extra: null },
-    { label: 'RAM',  icon: <MemoryStick size={14} />,  value: ram,  extra: null },
-    { label: 'Disk', icon: <HardDrive size={14} />,    value: disk, extra: `${data.disk_used ?? '?'} / ${data.disk_size ?? '?'}` },
-  ].filter((g) => g.value != null);
 
   function gaugeColor(v) {
     if (v >= 90) return 'var(--red)';
@@ -693,68 +623,69 @@ function SystemTab({ data }) {
     return '';
   }
 
-  // services is always an array from the API
+  const gauges = [
+    { label: 'CPU',  icon: <Cpu size={12} />,         value: cpu,  extra: null },
+    { label: 'RAM',  icon: <MemoryStick size={12} />,  value: ram,  extra: null },
+    { label: 'DISK', icon: <HardDrive size={12} />,    value: disk, extra: `${data.disk_used ?? '?'} / ${data.disk_size ?? '?'}` },
+  ].filter(g => g.value != null);
+
   const serviceList = Array.isArray(data.services)
     ? data.services
     : Object.entries(data.services ?? {}).map(([k, v]) => ({ service: k, status: v, active: v === 'active' || v === true }));
 
   return (
     <div>
-      <div className="grid-3 section-gap">
-        {gauges.map((g) => (
-          <div key={g.label} className="card">
-            <div className="card-title">{g.icon}{g.label}</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-              <span className="mono" style={{ fontSize: 28, fontWeight: 700, color: gaugeColor(g.value) }}>
-                {fmt(g.value, 1)}%
-              </span>
-              {g.extra && <span className="dim mono" style={{ fontSize: 11 }}>{g.extra}</span>}
+      <div className="row3 mb">
+        {gauges.map(g => (
+          <div key={g.label} className="panel">
+            <div className="panel-head">{g.icon}&nbsp;{g.label}</div>
+            <div className="gauge-val" style={{ color: gaugeColor(g.value) }}>
+              {fmt(g.value, 1)}%
             </div>
-            <div className="progress-bar">
-              <div className={`progress-fill ${gaugeClass(g.value)}`} style={{ width: `${Math.min(g.value, 100)}%` }} />
+            {g.extra && <div className="dim" style={{ fontSize: 10, marginBottom: 8 }}>{g.extra}</div>}
+            <div className="bar-wrap">
+              <div className={`bar-fill ${gaugeClass(g.value)}`} style={{ width: `${Math.min(g.value, 100)}%` }} />
             </div>
           </div>
         ))}
       </div>
 
       {data.load_avg && (
-        <div className="card section-gap">
-          <div className="card-title"><Activity size={14} />Load Average</div>
+        <div className="panel mb">
+          <div className="panel-head">LOAD AVERAGE</div>
           <div style={{ display: 'flex', gap: 32 }}>
             {(Array.isArray(data.load_avg) ? data.load_avg : [data.load_avg]).map((v, i) => (
               <div key={i}>
-                <div className="dim mono" style={{ fontSize: 10 }}>{['1m', '5m', '15m'][i] ?? `${i}`}</div>
-                <div className="mono" style={{ fontSize: 22, color: 'var(--green)' }}>{fmt(Number(v), 2)}</div>
+                <div className="dim" style={{ fontSize: 10, marginBottom: 4 }}>{['1m','5m','15m'][i] ?? `${i}`}</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--green)' }}>{fmt(Number(v), 2)}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      <div className="card">
-        <div className="card-title"><Server size={14} />Services</div>
+      <div className="panel">
+        <div className="panel-head">SERVICES</div>
         {serviceList.length === 0 ? (
-          <div className="empty-state">Sem dados de serviços</div>
+          <div className="empty">NO SERVICE DATA</div>
         ) : (
-          serviceList.map((svc) => {
+          serviceList.map(svc => {
             const name   = svc.service ?? svc.name ?? '?';
             const isUp   = svc.active ?? (svc.status === 'active' || svc.status === 'running');
             const status = svc.status ?? (isUp ? 'active' : 'down');
             const since  = svc.uptime_since ?? '';
             return (
-              <div key={name} className="service-item">
+              <div key={name} className="svc-row">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   {isUp
-                    ? <CheckCircle size={14} style={{ color: 'var(--green)' }} />
-                    : <XCircle    size={14} style={{ color: status === 'failed' ? 'var(--red)' : 'var(--yellow)' }} />}
+                    ? <CheckCircle size={13} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                    : <XCircle    size={13} style={{ color: status === 'failed' ? 'var(--red)' : 'var(--yellow)', flexShrink: 0 }} />}
                   <div>
-                    <div className="service-name">{name}</div>
-                    {since && <div className="dim mono" style={{ fontSize: 10 }}>{since}</div>}
+                    <div className="svc-name">{name}</div>
+                    {since && <div className="svc-since">{since}</div>}
                   </div>
                 </div>
-                <span className={`badge ${isUp ? 'badge-green' : status === 'failed' ? 'badge-red' : 'badge-yellow'}`}>
-                  {status}
-                </span>
+                <span className={`badge ${isUp ? 'bg' : status === 'failed' ? 'br' : 'by'}`}>{status}</span>
               </div>
             );
           })
@@ -764,9 +695,7 @@ function SystemTab({ data }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ROOT APP
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── ROOT APP ─────────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'overview', label: 'Overview',  icon: BarChart2  },
   { id: 'ibkr',     label: 'IBKR',      icon: TrendingUp },
@@ -778,11 +707,10 @@ const TABS = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('overview');
-  const [loading, setLoading]     = useState(false);
-  const [online, setOnline]       = useState(null);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [errors, setErrors]       = useState({});
+  const [activeTab,   setActiveTab]   = useState('overview');
+  const [loading,     setLoading]     = useState(false);
+  const [online,      setOnline]      = useState(null);
+  const [errors,      setErrors]      = useState({});
 
   const [pnl,     setPnl]     = useState(null);
   const [ibkr,    setIbkr]    = useState(null);
@@ -802,15 +730,14 @@ export default function App() {
       apiFetch('/api/funding'),
       apiFetch('/api/system'),
     ]);
-    if (pnlR.status     === 'fulfilled') setPnl(pnlR.value);       else errs.pnl = pnlR.reason?.message;
-    if (ibkrR.status    === 'fulfilled') setIbkr(ibkrR.value);     else errs.ibkr = ibkrR.reason?.message;
-    if (sniperR.status  === 'fulfilled') setSniper(sniperR.value); else errs.sniper = sniperR.reason?.message;
-    if (gridR.status    === 'fulfilled') setGrid(gridR.value);     else errs.grid = gridR.reason?.message;
+    if (pnlR.status     === 'fulfilled') setPnl(pnlR.value);         else errs.pnl     = pnlR.reason?.message;
+    if (ibkrR.status    === 'fulfilled') setIbkr(ibkrR.value);       else errs.ibkr    = ibkrR.reason?.message;
+    if (sniperR.status  === 'fulfilled') setSniper(sniperR.value);   else errs.sniper  = sniperR.reason?.message;
+    if (gridR.status    === 'fulfilled') setGrid(gridR.value);       else errs.grid    = gridR.reason?.message;
     if (fundingR.status === 'fulfilled') setFunding(fundingR.value); else errs.funding = fundingR.reason?.message;
-    if (systemR.status  === 'fulfilled') setSystem(systemR.value); else errs.system = systemR.reason?.message;
+    if (systemR.status  === 'fulfilled') setSystem(systemR.value);   else errs.system  = systemR.reason?.message;
     setErrors(errs);
     setOnline(Object.keys(errs).length < 6);
-    setLastUpdate(new Date().toLocaleTimeString());
     setLoading(false);
   }, []);
 
@@ -823,35 +750,25 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <div className="header-logo">
-          <div className="header-logo-icon">
-            <Activity size={18} />
-          </div>
-          <div>
-            <div className="header-title">TRADER DASHBOARD</div>
-            <div className="header-subtitle">Algorithmic Trading Monitor</div>
-          </div>
+        <div className="header-brand">
+          <div className="header-title">TRADER DASHBOARD</div>
+          <div className="header-sub">Algorithmic Trading Monitor</div>
         </div>
         <div className="header-right">
-          {lastUpdate && (
-            <div className="status-pill">
-              <Clock size={11} />
-              {lastUpdate}
-            </div>
-          )}
+          <LiveClock />
           <div className="status-pill">
-            <div className={`status-dot ${online === false ? 'offline' : ''}`} />
-            {online === null ? 'Connecting…' : online ? 'Online' : 'Parcial'}
+            <div className={`dot ${online === false ? 'offline' : ''}`} />
+            {online === null ? 'connecting...' : online ? 'online' : 'partial'}
           </div>
-          <button className={`refresh-btn ${loading ? 'spinning' : ''}`} onClick={fetchAll}>
-            <RefreshCw size={12} />Refresh
+          <button className={`btn ${loading ? 'spin' : ''}`} onClick={fetchAll}>
+            <RefreshCw size={11} /> refresh
           </button>
         </div>
       </header>
 
       <nav className="tabs">
-        {TABS.map((t) => {
-          const Icon  = t.icon;
+        {TABS.map(t => {
+          const Icon   = t.icon;
           const hasErr = errors[t.id];
           return (
             <button
@@ -859,9 +776,9 @@ export default function App() {
               className={`tab ${activeTab === t.id ? 'active' : ''}`}
               onClick={() => setActiveTab(t.id)}
             >
-              <Icon size={14} />
+              <Icon size={13} />
               {t.label}
-              {hasErr && <span className="tab-badge" style={{ background: 'var(--red)' }}>!</span>}
+              {hasErr && <span className="tab-err" />}
             </button>
           );
         })}
@@ -869,12 +786,12 @@ export default function App() {
 
       <main className="content" key={activeTab}>
         {activeTab === 'overview' && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} />}
-        {activeTab === 'ibkr'     && (errors.ibkr    ? <ErrBox msg={errors.ibkr}    /> : <IBKRTab    data={ibkr}    />)}
-        {activeTab === 'sniper'   && (errors.sniper  ? <ErrBox msg={errors.sniper}  /> : <SniperTab  data={sniper}  />)}
-        {activeTab === 'grid'     && (errors.grid    ? <ErrBox msg={errors.grid}    /> : <GridTab    data={grid}    />)}
-        {activeTab === 'funding'  && (errors.funding ? <ErrBox msg={errors.funding} /> : <FundingTab data={funding} />)}
+        {activeTab === 'ibkr'     && (errors.ibkr    ? <Err msg={errors.ibkr}    /> : <IBKRTab    data={ibkr}    />)}
+        {activeTab === 'sniper'   && (errors.sniper  ? <Err msg={errors.sniper}  /> : <SniperTab  data={sniper}  />)}
+        {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
+        {activeTab === 'funding'  && (errors.funding ? <Err msg={errors.funding} /> : <FundingTab data={funding} />)}
         {activeTab === 'logs'     && <LogsTab />}
-        {activeTab === 'system'   && (errors.system  ? <ErrBox msg={errors.system}  /> : <SystemTab  data={system}  />)}
+        {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
     </div>
   );
