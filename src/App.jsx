@@ -935,10 +935,11 @@ const TABS = [
 ];
 
 export default function App() {
-  const [activeTab,   setActiveTab]   = useState('overview');
-  const [loading,     setLoading]     = useState(false);
-  const [online,      setOnline]      = useState(null);
-  const [errors,      setErrors]      = useState({});
+  const [activeTab,     setActiveTab]     = useState('overview');
+  const [loading,       setLoading]       = useState(false);
+  const [online,        setOnline]        = useState(null);
+  const [errors,        setErrors]        = useState({});
+  const [reportLoading, setReportLoading] = useState(false);
 
   const [pnl,      setPnl]      = useState(null);
   const [ibkr,     setIbkr]     = useState(null);
@@ -981,6 +982,26 @@ export default function App() {
     return () => clearInterval(id);
   }, [fetchAll]);
 
+  const generateReport = useCallback(async () => {
+    setReportLoading(true);
+    try {
+      const res = await fetch('/api/report');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { html, mode } = await res.json();
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+        win.document.title = mode === 'ai' ? 'AI Report' : 'Auto Report';
+      }
+    } catch (e) {
+      console.error('Report error:', e);
+    } finally {
+      setReportLoading(false);
+    }
+  }, []);
+
   return (
     <div className="app">
       <header className="header">
@@ -994,6 +1015,14 @@ export default function App() {
             <div className={`dot ${online === false ? 'offline' : ''}`} />
             {online === null ? 'connecting...' : online ? 'online' : 'partial'}
           </div>
+          <button
+            className={`btn btn-report ${reportLoading ? 'spin' : ''}`}
+            onClick={generateReport}
+            disabled={reportLoading}
+            title="Gerar relatório de análise"
+          >
+            <FileText size={11} /> report
+          </button>
           <button className={`btn ${loading ? 'spin' : ''}`} onClick={fetchAll}>
             <RefreshCw size={11} /> refresh
           </button>

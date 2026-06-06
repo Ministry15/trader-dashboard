@@ -135,6 +135,10 @@ html, body, #root {
 .btn:hover { border-color: var(--green); color: var(--green); background: var(--green-glow); }
 .btn.spin svg { animation: spin .7s linear infinite; }
 
+.btn-report { color: var(--blue); border-color: rgba(0,170,255,.25); }
+.btn-report:hover { color: var(--blue); border-color: var(--blue); background: rgba(0,170,255,.07); }
+.btn-report:disabled { opacity: .5; cursor: default; pointer-events: none; }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ─── Tabs ───────────────────────────────────────────────────────────────── */
