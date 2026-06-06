@@ -24,9 +24,10 @@ from utils.notifier import TelegramNotifier
 
 logger = get_logger(__name__)
 
-JUPITER_PRICE_URL = "https://price.jup.ag/v4/price?ids=SOL"
+COINGECKO_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
 SOL_FEE_USD = Decimal("0.0001")          # custo fixo por transacção Solana
 _PRICE_FALLBACK = Decimal("150")         # usado se a API falhar no arranque
+_PRICE_BACKOFF_SECONDS = 60
 
 
 def _dry_run_flag() -> bool:
@@ -60,6 +61,7 @@ class SolanaGridBot:
 
         self.dry_run = _dry_run_flag()
         self.notifier = TelegramNotifier(self.settings)
+        self._price_backoff_until: float = 0.0
         init_db()
 
         price = self._fetch_price()
@@ -82,13 +84,22 @@ class SolanaGridBot:
     # ------------------------------------------------------------------ preço
 
     def _fetch_price(self) -> Decimal:
+        now = time.time()
+        if now < self._price_backoff_until:
+            remaining = self._price_backoff_until - now
+            logger.debug("CoinGecko price: backoff activo mais %.0fs — fallback %.2f", remaining, _PRICE_FALLBACK)
+            return _PRICE_FALLBACK
         try:
-            resp = requests.get(JUPITER_PRICE_URL, timeout=10)
+            resp = requests.get(COINGECKO_PRICE_URL, timeout=10)
             resp.raise_for_status()
             data = resp.json()
-            return Decimal(str(data["data"]["SOL"]["price"]))
+            return Decimal(str(data["solana"]["usd"]))
         except (KeyError, InvalidOperation, requests.RequestException, ValueError) as exc:
-            logger.warning("Jupiter price fetch falhou: %s — fallback %.2f", exc, _PRICE_FALLBACK)
+            self._price_backoff_until = time.time() + _PRICE_BACKOFF_SECONDS
+            logger.warning(
+                "CoinGecko price fetch falhou: %s — backoff %ds, fallback %.2f",
+                exc, _PRICE_BACKOFF_SECONDS, _PRICE_FALLBACK,
+            )
             return _PRICE_FALLBACK
 
     # ----------------------------------------------------------- cruzamentos
