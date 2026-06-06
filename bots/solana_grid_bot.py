@@ -24,8 +24,8 @@ from utils.notifier import TelegramNotifier
 
 logger = get_logger(__name__)
 
-COINGECKO_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
-BINANCE_PRICE_URL   = "https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT"
+JUPITER_PRICE_URL = "https://price.jup.ag/v4/price?ids=SOL"
+BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT"
 SOL_FEE_USD = Decimal("0.0001")          # custo fixo por transacção Solana
 _PRICE_BACKOFF_SECONDS = 60
 
@@ -62,7 +62,7 @@ class SolanaGridBot:
         self.dry_run = _dry_run_flag()
         self.notifier = TelegramNotifier(self.settings)
         self._last_valid_price: Decimal | None = None
-        self._cg_backoff_until: float = 0.0
+        self._jup_backoff_until: float = 0.0
         self._bn_backoff_until: float = 0.0
         init_db()
 
@@ -91,26 +91,26 @@ class SolanaGridBot:
             float(self.levels[0]), float(self.levels[-1]),
             float(self.order_size_quote), float(SOL_FEE_USD),
             self.dry_run, short_wallet,
-            "coingecko" if self._cg_backoff_until == 0.0 else "binance",
+            "jupiter" if self._jup_backoff_until == 0.0 else "binance",
         )
 
     # ------------------------------------------------------------------ preço
 
     def _fetch_price(self) -> Decimal | None:
-        """CoinGecko → Binance → último preço válido (None se nunca houve)."""
+        """Jupiter → Binance → último preço válido (None se nunca houve)."""
         now = time.time()
 
-        # --- 1. CoinGecko ---
-        if now >= self._cg_backoff_until:
+        # --- 1. Jupiter ---
+        if now >= self._jup_backoff_until:
             try:
-                resp = requests.get(COINGECKO_PRICE_URL, timeout=10)
+                resp = requests.get(JUPITER_PRICE_URL, timeout=10)
                 resp.raise_for_status()
-                price = Decimal(str(resp.json()["solana"]["usd"]))
+                price = Decimal(str(resp.json()["data"]["SOL"]["price"]))
                 self._last_valid_price = price
                 return price
             except (KeyError, InvalidOperation, requests.RequestException, ValueError) as exc:
-                self._cg_backoff_until = now + _PRICE_BACKOFF_SECONDS
-                logger.warning("CoinGecko price falhou: %s — backoff %ds", exc, _PRICE_BACKOFF_SECONDS)
+                self._jup_backoff_until = now + _PRICE_BACKOFF_SECONDS
+                logger.warning("Jupiter price falhou: %s — backoff %ds", exc, _PRICE_BACKOFF_SECONDS)
 
         # --- 2. Binance ---
         if now >= self._bn_backoff_until:

@@ -18,6 +18,8 @@ from __future__ import annotations
 import time
 from decimal import Decimal
 
+import requests
+
 from core.dex import Dex
 from core.risk_manager import RiskManager
 from core.wallet import Wallet
@@ -50,6 +52,9 @@ class GridBot:
             Decimal(str(cfg.get("recenter_threshold_pct", 5))) / 100
         )
 
+        self._price_source: str = cfg.get("price_source", "dex")
+        self._binance_symbol: str = cfg.get("binance_symbol", "")
+
         self.wallet = Wallet(self.settings)
         self.dex = Dex(cfg["dex"], wallet=self.wallet, settings=self.settings)
         self.risk = RiskManager(settings=self.settings)
@@ -63,7 +68,7 @@ class GridBot:
         if "range_pct" in cfg:
             # Range dinâmico: calculado a partir do preço live no arranque
             self._range_pct: Decimal | None = Decimal(str(cfg["range_pct"]))
-            price = self.dex.get_price(self.base, self.quote)
+            price = self._fetch_price()
             lower = price * (1 - self._range_pct)
             upper = price * (1 + self._range_pct)
             logger.info(
@@ -76,6 +81,26 @@ class GridBot:
             upper = Decimal(str(cfg["upper_price"]))
 
         self.levels = build_levels(lower, upper, n_levels)
+
+    # ------------------------------------------------------------ fonte de preço
+    def _fetch_price(self) -> Decimal:
+        """Binance REST API (se configurado) com fallback DEX on-chain."""
+        if self._price_source == "binance" and self._binance_symbol:
+            try:
+                resp = requests.get(
+                    f"https://api.binance.com/api/v3/ticker/price?symbol={self._binance_symbol}",
+                    timeout=5,
+                )
+                resp.raise_for_status()
+                price = Decimal(str(resp.json()["price"]))
+                logger.debug("Preço %s via Binance: %.8f", self._binance_symbol, price)
+                return price
+            except Exception as exc:
+                logger.warning(
+                    "Binance price falhou (%s): %s — fallback DEX on-chain",
+                    self._binance_symbol, exc,
+                )
+        return self.dex.get_price(self.base, self.quote)
 
     # --------------------------------------------------------------- sinais
     def crossings(self, prev: Decimal, cur: Decimal) -> list[tuple[str, Decimal]]:
@@ -166,7 +191,7 @@ class GridBot:
         return {"executed": True, "side": side, "level": level, "result": result}
 
     def tick(self) -> list[dict]:
-        price = self.dex.get_price(self.base, self.quote)
+        price = self._fetch_price()
 
         if self._maybe_recenter(price):
             return []  # grid recentrado; salta cruzamentos neste tick
