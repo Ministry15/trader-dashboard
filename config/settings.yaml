@@ -135,6 +135,7 @@ orchestrator:
     - "solana_grid"
     - "sniper"
     - "solana_sniper"
+    - "aave_liquidator"
 
 # ------------------------------------------------------------------------------
 # BOTS — parâmetros por estratégia
@@ -199,9 +200,9 @@ bots:
     auto_discovery:
       enabled: true
       scan_interval_seconds: 300  # re-scan a cada 5 min via GeckoTerminal
-      min_volume_usd: 100000      # volume 24h > $100k
-      min_liquidity_usd: 100000   # liquidez (TVL) > $100k (aumentado de $50k)
-      max_age_days: 3             # pool criado há menos de 3 dias (reduzido de 7)
+      min_volume_usd: 10000       # volume 24h > $10k
+      min_liquidity_usd: 20000    # liquidez (TVL) > $20k
+      max_age_hours: 1            # pool criado há menos de 1 hora
       max_tokens: 10              # máx. tokens em carteira simultaneamente
       safety_check: true          # verificar honeypot/tax/rug via GoPlus
       safety_require_goplus: true # true=rejeitar tokens sem dados GoPlus (rug pulls são novos)
@@ -218,6 +219,15 @@ bots:
     top10_holders_max_pct: 30        # top 10 holders < 30% do supply
     summary_interval_seconds: 3600   # resumo Telegram de hora em hora
     blacklist: []                    # mints a ignorar sempre (populado via SL)
+
+  aave_liquidator:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.05     # monitorizar posições com HF abaixo disto
+    min_profit_usd: 5.0               # só executar se lucro líquido > $5 (DRY_RUN ignora)
+    max_positions_per_tick: 50        # máx. posições a verificar por tick
+    borrower_scan_blocks: 50000       # janela de blocos para descobrir mutuários (~14h em Base)
+    flash_loan_contract: "0x9531F6F28202B7E83717b31992035F769046135B"
+    chain_id: 8453                    # Base mainnet
 
 # ------------------------------------------------------------------------------
 # NOTIFICAÇÕES
