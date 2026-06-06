@@ -1,5 +1,5 @@
 const API_KEY = process.env.TRADER_API_KEY || 'JPxK9m2026TraderB0t!';
-const API_BASE = 'http://178.104.133.71:8000';
+const API_BASE = 'http://178.104.133.71:5000';
 
 export default async function handler(req, res) {
   const path = req.query.path;
@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   try {
     const upstream = await fetch(`${API_BASE}${path}`, {
-      headers: { 'x-api-key': API_KEY },
+      headers: { 'Authorization': `Bearer ${API_KEY}` },
     });
     const data = await upstream.json();
     res.status(upstream.status).json(data);
