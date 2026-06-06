@@ -687,6 +687,79 @@ const LOG_SERVICES = [
   { label: 'flash-arb-bot',     value: 'flash-arb-bot'  },
 ];
 
+// ─── LIQUIDATIONS TAB ─────────────────────────────────────────────────────────
+function LiquidationsTab({ data }) {
+  if (!data) return <Loader />;
+  const opps    = data.opportunities ?? [];
+  const summary = data.summary       ?? {};
+  return (
+    <div>
+      <div className="kpi-row">
+        <div className="kpi-card">
+          <div className="kpi-label">Oportunidades</div>
+          <div className="kpi-value">{summary.total ?? 0}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Executadas</div>
+          <div className="kpi-value">{summary.executed ?? 0}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Lucro Estimado</div>
+          <div className={`kpi-value ${clr(summary.total_est_profit)}`}>
+            {fmtUSD(summary.total_est_profit)}
+          </div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Melhor Oportunidade</div>
+          <div className={`kpi-value ${clr(summary.best_profit)}`}>
+            {fmtUSD(summary.best_profit)}
+          </div>
+        </div>
+      </div>
+      {opps.length === 0 ? (
+        <div className="err-box">Sem oportunidades registadas. Bot a monitorizar Aave V3 Base...</div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Posição</th>
+              <th>HF</th>
+              <th>Dívida USD</th>
+              <th>Bonus</th>
+              <th>Lucro Est.</th>
+              <th>Status</th>
+              <th>TX</th>
+            </tr>
+          </thead>
+          <tbody>
+            {opps.map((o, i) => (
+              <tr key={i} className={o.health_factor < 1.0 ? 'neg' : ''}>
+                <td>{o.ts ? o.ts.slice(0, 19).replace('T', ' ') : '—'}</td>
+                <td title={o.position_address}>
+                  {o.position_address ? o.position_address.slice(0, 10) + '…' : '—'}
+                </td>
+                <td className={o.health_factor < 1.0 ? 'neg' : 'pos'}>
+                  {fmt(o.health_factor, 4)}
+                </td>
+                <td>{fmtUSD(o.debt_usd)}</td>
+                <td>{o.bonus_pct != null ? `${o.bonus_pct}%` : '—'}</td>
+                <td className={clr(o.estimated_profit)}>{fmtUSD(o.estimated_profit)}</td>
+                <td>
+                  <span className={o.executed ? 'pos' : ''}>
+                    {o.dry_run ? '[dry] ' : ''}{o.status ?? '—'}
+                  </span>
+                </td>
+                <td>{o.tx_hash ? o.tx_hash.slice(0, 12) + '…' : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function LogsTab() {
   const [service, setService] = useState('autonomous-trader');
   const [lines,   setLines]   = useState([]);
@@ -856,6 +929,7 @@ const TABS = [
   { id: 'grid',       label: 'Grid',       icon: Grid       },
   { id: 'funding',    label: 'Funding',    icon: DollarSign },
   { id: 'flash-arb',  label: 'Flash Arb',  icon: Zap        },
+  { id: 'liquidations', label: 'Liquidations', icon: Activity },
   { id: 'logs',       label: 'Logs',       icon: FileText   },
   { id: 'system',     label: 'System',     icon: Server     },
 ];
@@ -872,12 +946,13 @@ export default function App() {
   const [grid,     setGrid]     = useState(null);
   const [funding,  setFunding]  = useState(null);
   const [system,   setSystem]   = useState(null);
-  const [flashArb, setFlashArb] = useState(null);
+  const [flashArb,     setFlashArb]     = useState(null);
+  const [liquidations, setLiquidations] = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
@@ -885,16 +960,18 @@ export default function App() {
       apiFetch('/api/funding'),
       apiFetch('/api/system'),
       apiFetch('/api/flash-arb'),
+      apiFetch('/api/liquidations'),
     ]);
-    if (pnlR.status      === 'fulfilled') setPnl(pnlR.value);           else errs.pnl      = pnlR.reason?.message;
-    if (ibkrR.status     === 'fulfilled') setIbkr(ibkrR.value);         else errs.ibkr     = ibkrR.reason?.message;
-    if (sniperR.status   === 'fulfilled') setSniper(sniperR.value);     else errs.sniper   = sniperR.reason?.message;
-    if (gridR.status     === 'fulfilled') setGrid(gridR.value);         else errs.grid     = gridR.reason?.message;
-    if (fundingR.status  === 'fulfilled') setFunding(fundingR.value);   else errs.funding  = fundingR.reason?.message;
-    if (systemR.status   === 'fulfilled') setSystem(systemR.value);     else errs.system   = systemR.reason?.message;
-    if (flashArbR.status === 'fulfilled') setFlashArb(flashArbR.value); else errs.flashArb = flashArbR.reason?.message;
+    if (pnlR.status          === 'fulfilled') setPnl(pnlR.value);               else errs.pnl          = pnlR.reason?.message;
+    if (ibkrR.status         === 'fulfilled') setIbkr(ibkrR.value);             else errs.ibkr         = ibkrR.reason?.message;
+    if (sniperR.status       === 'fulfilled') setSniper(sniperR.value);         else errs.sniper       = sniperR.reason?.message;
+    if (gridR.status         === 'fulfilled') setGrid(gridR.value);             else errs.grid         = gridR.reason?.message;
+    if (fundingR.status      === 'fulfilled') setFunding(fundingR.value);       else errs.funding      = fundingR.reason?.message;
+    if (systemR.status       === 'fulfilled') setSystem(systemR.value);         else errs.system       = systemR.reason?.message;
+    if (flashArbR.status     === 'fulfilled') setFlashArb(flashArbR.value);     else errs.flashArb     = flashArbR.reason?.message;
+    if (liquidationsR.status === 'fulfilled') setLiquidations(liquidationsR.value); else errs.liquidations = liquidationsR.reason?.message;
     setErrors(errs);
-    setOnline(Object.keys(errs).length < 6);
+    setOnline(Object.keys(errs).length < 7);
     setLoading(false);
   }, []);
 
@@ -948,6 +1025,7 @@ export default function App() {
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
         {activeTab === 'funding'  && (errors.funding ? <Err msg={errors.funding} /> : <FundingTab data={funding} />)}
         {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
+        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab data={liquidations} />)}
         {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
