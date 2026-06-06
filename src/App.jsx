@@ -56,7 +56,7 @@ function LiveClock() {
 }
 
 // ─── OVERVIEW ─────────────────────────────────────────────────────────────────
-function OverviewTab({ pnl, ibkr, sniper, grid }) {
+function OverviewTab({ pnl, ibkr, sniper, grid, flashArb }) {
   if (!pnl) return <Loader />;
 
   const todayBNB    = pnl.today?.sniper_bnb   ?? 0;
@@ -162,6 +162,22 @@ function OverviewTab({ pnl, ibkr, sniper, grid }) {
               <div className="kv">
                 <span className="kv-k">GRID BOTS ACTIVE</span>
                 <span className="pos">{grid.active_bots}</span>
+              </div>
+            )}
+            {flashArb != null && (
+              <div className="kv">
+                <span className="kv-k">FLASH ARB P&amp;L</span>
+                <span className={clr(flashArb.total_pnl_usd ?? 0)}>
+                  {fmtUSD(flashArb.total_pnl_usd ?? 0)}
+                </span>
+              </div>
+            )}
+            {flashArb?.service_status != null && (
+              <div className="kv">
+                <span className="kv-k">FLASH ARB BOT</span>
+                <span className={`badge ${flashArb.service_status.active ? 'bg' : 'br'}`} style={{ fontSize: 9 }}>
+                  {flashArb.service_status.status ?? 'unknown'}
+                </span>
               </div>
             )}
           </div>
@@ -520,6 +536,144 @@ function FundingTab({ data }) {
   );
 }
 
+// ─── FLASH ARB ────────────────────────────────────────────────────────────────
+function FlashArbTab({ data }) {
+  if (!data) return <Loader />;
+
+  const svc      = data.service_status         ?? {};
+  const isActive = svc.active                  ?? false;
+  const trades   = data.recent_trades          ?? [];
+  const opps     = data.recent_opps            ?? [];
+  const logs     = data.recent_logs            ?? [];
+  const totalPnl = data.total_pnl_usd          ?? 0;
+  const executed = data.trades_executed        ?? 0;
+  const detected = data.opportunities_detected ?? 0;
+  const lastSpread = data.last_spread          ?? null;
+  const lastPair   = data.last_spread_pair     ?? '—';
+  const ethBal     = data.eth_balance          ?? null;
+
+  function parseLevel(line) {
+    if (/ERROR|CRITICAL/i.test(line)) return 'ERROR';
+    if (/WARN/i.test(line))           return 'WARN';
+    return 'INFO';
+  }
+
+  return (
+    <div>
+      <div className="kpi-grid mb">
+        <div className="kpi">
+          <div className="kpi-label">// SERVIÇO</div>
+          <div style={{ marginTop: 8 }}>
+            <span className={`badge ${isActive ? 'bg' : 'br'}`}>{svc.status ?? 'unknown'}</span>
+          </div>
+          <div className="kpi-sub">{ethBal != null ? `${Number(ethBal).toFixed(6)} ETH` : '—'}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">// P&amp;L ACUMULADO</div>
+          <div className={`kpi-val ${totalPnl < 0 ? 'neg' : ''}`}>{fmtUSD(totalPnl)}</div>
+          <div className="kpi-sub">{executed} TRADES EXEC.</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">// OPORTUNIDADES</div>
+          <div className="kpi-val neu">{detected}</div>
+          <div className="kpi-sub">{executed} EXECUTADAS</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">// ÚLTIMO SPREAD</div>
+          <div className="kpi-val" style={{ fontSize: 18 }}>
+            {lastSpread != null ? `${Number(lastSpread).toFixed(4)}%` : '—'}
+          </div>
+          <div className="kpi-sub">{lastPair}</div>
+        </div>
+      </div>
+
+      <div className="panel mb">
+        <div className="panel-head">TRADES EXECUTADOS — FLASH ARB BASE</div>
+        {trades.length === 0 ? (
+          <div className="empty">SEM TRADES — A MONITORIZAR SPREADS…</div>
+        ) : (
+          <div className="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Par</th>
+                  <th>Spread</th>
+                  <th>Profit</th>
+                  <th>P&amp;L Total</th>
+                  <th>Tx</th>
+                  <th>Hora</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...trades].reverse().map((t, i) => (
+                  <tr key={i}>
+                    <td style={{ color: 'var(--green)', fontWeight: 700 }}>{t.pair ?? '—'}</td>
+                    <td style={{ color: 'var(--blue)' }}>{t.spread != null ? `${Number(t.spread).toFixed(4)}%` : '—'}</td>
+                    <td className={clr(t.profit)}>{t.profit != null ? fmtUSD(t.profit) : '—'}</td>
+                    <td className="pos">{t.total != null ? fmtUSD(t.total) : '—'}</td>
+                    <td className="dim" style={{ fontSize: 10, fontFamily: 'monospace' }}>
+                      {t.tx ? t.tx.slice(0, 14) + '…' : '—'}
+                    </td>
+                    <td className="dim" style={{ fontSize: 10 }}>{t.timestamp ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {opps.length > 0 && (
+        <div className="panel mb">
+          <div className="panel-head">OPORTUNIDADES RECENTES</div>
+          <div className="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Par</th>
+                  <th>Spread</th>
+                  <th>Direção</th>
+                  <th>Hora</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...opps].reverse().map((o, i) => (
+                  <tr key={i}>
+                    <td style={{ color: 'var(--text-sec)', fontWeight: 700 }}>{o.pair ?? '—'}</td>
+                    <td style={{ color: 'var(--yellow)' }}>{o.spread != null ? `${Number(o.spread).toFixed(4)}%` : '—'}</td>
+                    <td><span className="badge by">{o.reverse ? 'AERO→UNI' : 'UNI→AERO'}</span></td>
+                    <td className="dim" style={{ fontSize: 10 }}>{o.timestamp ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="panel">
+        <div className="panel-head">LOGS EM TEMPO REAL</div>
+        <div className="log-console" style={{ maxHeight: 280 }}>
+          {logs.length === 0 && <span className="dim">~ sem logs ~</span>}
+          {logs.slice(-60).map((line, i) => {
+            const level   = parseLevel(line);
+            const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/);
+            const ts      = tsMatch ? tsMatch[1] : null;
+            const rest    = ts ? line.slice(ts.length).trim() : line;
+            return (
+              <span key={i} className="log-line">
+                {ts && <span className="log-ts">{ts}</span>}
+                <span className={`log-${level}`}>[{level}]</span>{' '}
+                <span className="log-text">{rest}</span>{'\n'}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── LOGS ─────────────────────────────────────────────────────────────────────
 const LOG_SERVICES = [
   { label: 'autonomous-trader', value: 'autonomous-trader' },
@@ -530,6 +684,7 @@ const LOG_SERVICES = [
   { label: 'tgbot-grid',        value: 'tgbot-grid' },
   { label: 'tgbot-funding',     value: 'tgbot-funding' },
   { label: 'hermes-gateway',    value: 'hermes-gateway' },
+  { label: 'flash-arb-bot',     value: 'flash-arb-bot'  },
 ];
 
 function LogsTab() {
@@ -695,13 +850,14 @@ function SystemTab({ data }) {
 
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'overview', label: 'Overview',  icon: BarChart2  },
-  { id: 'ibkr',     label: 'IBKR',      icon: TrendingUp },
-  { id: 'sniper',   label: 'Sniper',    icon: Target     },
-  { id: 'grid',     label: 'Grid',      icon: Grid       },
-  { id: 'funding',  label: 'Funding',   icon: DollarSign },
-  { id: 'logs',     label: 'Logs',      icon: FileText   },
-  { id: 'system',   label: 'System',    icon: Server     },
+  { id: 'overview',   label: 'Overview',   icon: BarChart2  },
+  { id: 'ibkr',       label: 'IBKR',       icon: TrendingUp },
+  { id: 'sniper',     label: 'Sniper',     icon: Target     },
+  { id: 'grid',       label: 'Grid',       icon: Grid       },
+  { id: 'funding',    label: 'Funding',    icon: DollarSign },
+  { id: 'flash-arb',  label: 'Flash Arb',  icon: Zap        },
+  { id: 'logs',       label: 'Logs',       icon: FileText   },
+  { id: 'system',     label: 'System',     icon: Server     },
 ];
 
 export default function App() {
@@ -710,30 +866,33 @@ export default function App() {
   const [online,      setOnline]      = useState(null);
   const [errors,      setErrors]      = useState({});
 
-  const [pnl,     setPnl]     = useState(null);
-  const [ibkr,    setIbkr]    = useState(null);
-  const [sniper,  setSniper]  = useState(null);
-  const [grid,    setGrid]    = useState(null);
-  const [funding, setFunding] = useState(null);
-  const [system,  setSystem]  = useState(null);
+  const [pnl,      setPnl]      = useState(null);
+  const [ibkr,     setIbkr]     = useState(null);
+  const [sniper,   setSniper]   = useState(null);
+  const [grid,     setGrid]     = useState(null);
+  const [funding,  setFunding]  = useState(null);
+  const [system,   setSystem]   = useState(null);
+  const [flashArb, setFlashArb] = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
       apiFetch('/api/grid'),
       apiFetch('/api/funding'),
       apiFetch('/api/system'),
+      apiFetch('/api/flash-arb'),
     ]);
-    if (pnlR.status     === 'fulfilled') setPnl(pnlR.value);         else errs.pnl     = pnlR.reason?.message;
-    if (ibkrR.status    === 'fulfilled') setIbkr(ibkrR.value);       else errs.ibkr    = ibkrR.reason?.message;
-    if (sniperR.status  === 'fulfilled') setSniper(sniperR.value);   else errs.sniper  = sniperR.reason?.message;
-    if (gridR.status    === 'fulfilled') setGrid(gridR.value);       else errs.grid    = gridR.reason?.message;
-    if (fundingR.status === 'fulfilled') setFunding(fundingR.value); else errs.funding = fundingR.reason?.message;
-    if (systemR.status  === 'fulfilled') setSystem(systemR.value);   else errs.system  = systemR.reason?.message;
+    if (pnlR.status      === 'fulfilled') setPnl(pnlR.value);           else errs.pnl      = pnlR.reason?.message;
+    if (ibkrR.status     === 'fulfilled') setIbkr(ibkrR.value);         else errs.ibkr     = ibkrR.reason?.message;
+    if (sniperR.status   === 'fulfilled') setSniper(sniperR.value);     else errs.sniper   = sniperR.reason?.message;
+    if (gridR.status     === 'fulfilled') setGrid(gridR.value);         else errs.grid     = gridR.reason?.message;
+    if (fundingR.status  === 'fulfilled') setFunding(fundingR.value);   else errs.funding  = fundingR.reason?.message;
+    if (systemR.status   === 'fulfilled') setSystem(systemR.value);     else errs.system   = systemR.reason?.message;
+    if (flashArbR.status === 'fulfilled') setFlashArb(flashArbR.value); else errs.flashArb = flashArbR.reason?.message;
     setErrors(errs);
     setOnline(Object.keys(errs).length < 6);
     setLoading(false);
@@ -783,12 +942,13 @@ export default function App() {
       </nav>
 
       <main className="content" key={activeTab}>
-        {activeTab === 'overview' && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} />}
+        {activeTab === 'overview'  && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} flashArb={flashArb} />}
         {activeTab === 'ibkr'     && (errors.ibkr    ? <Err msg={errors.ibkr}    /> : <IBKRTab    data={ibkr}    />)}
         {activeTab === 'sniper'   && (errors.sniper  ? <Err msg={errors.sniper}  /> : <SniperTab  data={sniper}  />)}
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
         {activeTab === 'funding'  && (errors.funding ? <Err msg={errors.funding} /> : <FundingTab data={funding} />)}
-        {activeTab === 'logs'     && <LogsTab />}
+        {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
+        {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
     </div>
