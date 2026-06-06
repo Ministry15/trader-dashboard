@@ -8,7 +8,7 @@ import {
   Activity, TrendingUp, TrendingDown, Zap, Grid, DollarSign,
   Server, FileText, RefreshCw, AlertTriangle,
   CheckCircle, XCircle, Cpu, HardDrive, MemoryStick,
-  BarChart2, Target
+  BarChart2, Target, X, Download
 } from 'lucide-react';
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -921,6 +921,62 @@ function SystemTab({ data }) {
   );
 }
 
+// ─── REPORT MODAL ─────────────────────────────────────────────────────────────
+function ReportModal({ html, mode, onClose }) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  function download() {
+    const blob = new Blob([html], { type: 'text/html' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `trader-report-${new Date().toISOString().slice(0, 10)}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="report-overlay" onClick={onClose}>
+      <div className="report-modal" onClick={e => e.stopPropagation()}>
+        <div className="report-modal-head">
+          <div className="report-modal-title">
+            REPORT
+            <span className={`badge ${mode === 'ai' ? 'badge-ai' : 'badge-auto'}`}>
+              {mode === 'ai' ? 'AI Report' : 'Auto Report'}
+            </span>
+          </div>
+          <div className="report-modal-actions">
+            <button className="btn" onClick={download} title="Download HTML">
+              <Download size={11} /> download
+            </button>
+            <button className="btn btn-close" onClick={onClose} title="Fechar (Esc)">
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+        <div className="report-modal-body">
+          <iframe
+            srcDoc={html}
+            title="Trader Report"
+            className="report-iframe"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'overview',   label: 'Overview',   icon: BarChart2  },
@@ -940,6 +996,7 @@ export default function App() {
   const [online,        setOnline]        = useState(null);
   const [errors,        setErrors]        = useState({});
   const [reportLoading, setReportLoading] = useState(false);
+  const [report,        setReport]        = useState(null);
 
   const [pnl,      setPnl]      = useState(null);
   const [ibkr,     setIbkr]     = useState(null);
@@ -987,14 +1044,8 @@ export default function App() {
     try {
       const res = await fetch('/api/report');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { html, mode } = await res.json();
-      const win = window.open('', '_blank');
-      if (win) {
-        win.document.open();
-        win.document.write(html);
-        win.document.close();
-        win.document.title = mode === 'ai' ? 'AI Report' : 'Auto Report';
-      }
+      const data = await res.json();
+      setReport(data);
     } catch (e) {
       console.error('Report error:', e);
     } finally {
@@ -1004,6 +1055,13 @@ export default function App() {
 
   return (
     <div className="app">
+      {report && (
+        <ReportModal
+          html={report.html}
+          mode={report.mode}
+          onClose={() => setReport(null)}
+        />
+      )}
       <header className="header">
         <div className="header-brand">
           <div className="header-title">TRADER DASHBOARD</div>
@@ -1016,12 +1074,14 @@ export default function App() {
             {online === null ? 'connecting...' : online ? 'online' : 'partial'}
           </div>
           <button
-            className={`btn btn-report ${reportLoading ? 'spin' : ''}`}
+            className={`btn btn-report${reportLoading ? ' spin' : ''}`}
             onClick={generateReport}
             disabled={reportLoading}
             title="Gerar relatório de análise"
           >
-            <FileText size={11} /> report
+            {reportLoading
+              ? <><RefreshCw size={11} /> generating...</>
+              : <><FileText size={11} /> report</>}
           </button>
           <button className={`btn ${loading ? 'spin' : ''}`} onClick={fetchAll}>
             <RefreshCw size={11} /> refresh

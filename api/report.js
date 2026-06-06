@@ -30,9 +30,10 @@ function fmtUSD(n) {
 
 // ── CSS shared between both modes ─────────────────────────────────────────────
 const SHARED_CSS = `
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#0a0a0a;color:#ccffe6;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;padding:24px;max-width:960px;margin:0 auto}
+  body{background:#0a0a0a;color:#ccffe6;font-family:'JetBrains Mono',monospace;font-size:14px;line-height:1.65;padding:20px 16px;max-width:960px;margin:0 auto}
   h1{color:#00ff88;font-size:18px;letter-spacing:.1em;margin-bottom:4px}
   .ts{color:#555;font-size:11px;margin-bottom:24px}
   .badge{display:inline-block;padding:2px 10px;border-radius:2px;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-left:12px;vertical-align:middle}

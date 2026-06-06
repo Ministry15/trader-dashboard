@@ -139,6 +139,82 @@ html, body, #root {
 .btn-report:hover { color: var(--blue); border-color: var(--blue); background: rgba(0,170,255,.07); }
 .btn-report:disabled { opacity: .5; cursor: default; pointer-events: none; }
 
+.btn-close { padding: 4px 8px; }
+
+/* ─── Report Modal ───────────────────────────────────────────────────────── */
+.report-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 1000;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.report-modal {
+  background: var(--bg2);
+  border-left: 1px solid var(--border-hi);
+  border-right: 1px solid var(--border-hi);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 960px;
+  height: 100%;
+}
+
+.report-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-hi);
+  background: var(--bg2);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.report-modal-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: .1em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.report-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.report-modal-body {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.report-iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #0a0a0a;
+}
+
+.badge-ai   { background: rgba(0,255,136,.15); color: var(--green); border: 1px solid rgba(0,255,136,.4); }
+.badge-auto { background: rgba(0,170,255,.15); color: var(--blue);  border: 1px solid rgba(0,170,255,.4); }
+
+@media (max-width: 600px) {
+  .report-modal-head { padding: 8px 12px; }
+  .report-modal-title { font-size: 12px; }
+}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ─── Tabs ───────────────────────────────────────────────────────────────── */
