@@ -11,10 +11,12 @@ novos pares via mempool (isso exigiria um nó/stream de eventos dedicado).
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -28,6 +30,8 @@ from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
 logger = get_logger(__name__)
+
+_BLACKLIST_PATH = Path("/opt/crypto_bsc/data/security_blacklist.json")
 
 _GOPLUS_TOKEN_URL      = "https://api.gopluslabs.io/api/v1/token_security/56"
 _HONEYPOT_IS_URL       = "https://api.honeypot.is/v2/IsHoneypot"
@@ -68,7 +72,26 @@ class SniperBot:
         self.notifier = TelegramNotifier(self.settings)
         self.router = self.dex.cfg["router"]
         self.positions: dict[str, Position] = {}
+        self._security_blacklist: set[str] = self._load_blacklist()
         database.init_db()
+
+    # --------------------------------------------------- blacklist persistente
+    def _load_blacklist(self) -> set[str]:
+        try:
+            if _BLACKLIST_PATH.exists():
+                entries = {a.lower() for a in json.loads(_BLACKLIST_PATH.read_text())}
+                if entries:
+                    logger.info("Blacklist carregada: %d endereço(s) de %s", len(entries), _BLACKLIST_PATH)
+                return entries
+        except Exception as exc:
+            logger.warning("Erro ao carregar blacklist %s: %s", _BLACKLIST_PATH, exc)
+        return set()
+
+    def _save_blacklist(self) -> None:
+        try:
+            _BLACKLIST_PATH.write_text(json.dumps(sorted(self._security_blacklist), indent=2))
+        except Exception as exc:
+            logger.warning("Erro ao guardar blacklist %s: %s", _BLACKLIST_PATH, exc)
 
     # --------------------------------------------------------------- utils
     def _size_usd(self) -> Decimal:
@@ -210,6 +233,8 @@ class SniperBot:
         """Avalia e, se passar, executa a entrada num token."""
         if token in self.positions:
             return {"action": "skip", "reason": "já em posição"}
+        if self._resolve_address(token) in self._security_blacklist:
+            return {"action": "skip", "reason": "blacklist: falhou segurança anteriormente"}
         if not self.dex.has_liquidity(self.quote, token):
             return {"action": "skip", "reason": "sem pool"}
         impact = self.dex.price_impact_bps(self.quote, token, self.buy_amount)
@@ -218,7 +243,9 @@ class SniperBot:
 
         safe, reason = self._safety_check(token)
         if not safe:
-            logger.warning("SNIPE REJEITADO %s — %s", token, reason)
+            self._security_blacklist.add(self._resolve_address(token))
+            self._save_blacklist()
+            logger.warning("SNIPE REJEITADO %s — %s | adicionado à blacklist persistente", token, reason)
             return {"action": "skip", "reason": f"safety: {reason}"}
 
         decision = self.risk.check_size(self._size_usd())
