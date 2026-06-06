@@ -25,8 +25,8 @@ from utils.notifier import TelegramNotifier
 logger = get_logger(__name__)
 
 COINGECKO_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+BINANCE_PRICE_URL   = "https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT"
 SOL_FEE_USD = Decimal("0.0001")          # custo fixo por transacção Solana
-_PRICE_FALLBACK = Decimal("150")         # usado se a API falhar no arranque
 _PRICE_BACKOFF_SECONDS = 60
 
 
@@ -61,10 +61,22 @@ class SolanaGridBot:
 
         self.dry_run = _dry_run_flag()
         self.notifier = TelegramNotifier(self.settings)
-        self._price_backoff_until: float = 0.0
+        self._last_valid_price: Decimal | None = None
+        self._cg_backoff_until: float = 0.0
+        self._bn_backoff_until: float = 0.0
         init_db()
 
-        price = self._fetch_price()
+        # Retry ao arranque — sem preço real não construímos o grid
+        price: Decimal | None = None
+        for attempt in range(5):
+            price = self._fetch_price()
+            if price is not None:
+                break
+            logger.warning("Preço SOL indisponível no arranque (tentativa %d/5) — aguardar 5s", attempt + 1)
+            time.sleep(5)
+        if price is None:
+            raise RuntimeError("Impossível obter preço SOL no arranque após 5 tentativas")
+
         lower = price * (1 - self.range_pct)
         upper = price * (1 + self.range_pct)
         self.levels = _build_levels(lower, upper, self.grid_levels_n)
@@ -73,34 +85,52 @@ class SolanaGridBot:
         short_wallet = (self.wallet_address[:8] + "…") if self.wallet_address else "(none)"
         logger.info(
             "SolanaGridBot %s/%s: preço=%.4f range=±%.0f%% %d níveis "
-            "[%.4f..%.4f] $%.2f/ordem fee=$%.4f dry_run=%s wallet=%s",
+            "[%.4f..%.4f] $%.2f/ordem fee=$%.4f dry_run=%s wallet=%s fonte=%s",
             self.base, self.quote, float(price),
             float(self.range_pct) * 100, self.grid_levels_n,
             float(self.levels[0]), float(self.levels[-1]),
             float(self.order_size_quote), float(SOL_FEE_USD),
             self.dry_run, short_wallet,
+            "coingecko" if self._cg_backoff_until == 0.0 else "binance",
         )
 
     # ------------------------------------------------------------------ preço
 
-    def _fetch_price(self) -> Decimal:
+    def _fetch_price(self) -> Decimal | None:
+        """CoinGecko → Binance → último preço válido (None se nunca houve)."""
         now = time.time()
-        if now < self._price_backoff_until:
-            remaining = self._price_backoff_until - now
-            logger.debug("CoinGecko price: backoff activo mais %.0fs — fallback %.2f", remaining, _PRICE_FALLBACK)
-            return _PRICE_FALLBACK
-        try:
-            resp = requests.get(COINGECKO_PRICE_URL, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            return Decimal(str(data["solana"]["usd"]))
-        except (KeyError, InvalidOperation, requests.RequestException, ValueError) as exc:
-            self._price_backoff_until = time.time() + _PRICE_BACKOFF_SECONDS
-            logger.warning(
-                "CoinGecko price fetch falhou: %s — backoff %ds, fallback %.2f",
-                exc, _PRICE_BACKOFF_SECONDS, _PRICE_FALLBACK,
-            )
-            return _PRICE_FALLBACK
+
+        # --- 1. CoinGecko ---
+        if now >= self._cg_backoff_until:
+            try:
+                resp = requests.get(COINGECKO_PRICE_URL, timeout=10)
+                resp.raise_for_status()
+                price = Decimal(str(resp.json()["solana"]["usd"]))
+                self._last_valid_price = price
+                return price
+            except (KeyError, InvalidOperation, requests.RequestException, ValueError) as exc:
+                self._cg_backoff_until = now + _PRICE_BACKOFF_SECONDS
+                logger.warning("CoinGecko price falhou: %s — backoff %ds", exc, _PRICE_BACKOFF_SECONDS)
+
+        # --- 2. Binance ---
+        if now >= self._bn_backoff_until:
+            try:
+                resp = requests.get(BINANCE_PRICE_URL, timeout=10)
+                resp.raise_for_status()
+                price = Decimal(str(resp.json()["price"]))
+                self._last_valid_price = price
+                logger.info("Preço SOL via Binance fallback: %.4f", price)
+                return price
+            except (KeyError, InvalidOperation, requests.RequestException, ValueError) as exc:
+                self._bn_backoff_until = now + _PRICE_BACKOFF_SECONDS
+                logger.warning("Binance price falhou: %s — backoff %ds", exc, _PRICE_BACKOFF_SECONDS)
+
+        # --- 3. Último preço válido conhecido ---
+        if self._last_valid_price is not None:
+            logger.debug("Ambas as fontes em backoff — a usar último preço válido %.4f", self._last_valid_price)
+        else:
+            logger.warning("Sem preço SOL disponível de nenhuma fonte")
+        return self._last_valid_price
 
     # ----------------------------------------------------------- cruzamentos
 
@@ -194,6 +224,9 @@ class SolanaGridBot:
 
     def tick(self) -> list[dict]:
         price = self._fetch_price()
+        if price is None:
+            logger.debug("Sem preço válido — tick saltado, grid mantida")
+            return []
 
         if self._maybe_recenter(price):
             return []
