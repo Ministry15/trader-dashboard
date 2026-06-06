@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 
+from bots.aave_liquidator_bot import AaveLiquidatorBot
 from bots.arbitrage_bot import ArbitrageBot
 from bots.dca_bot import DCABot
 from bots.funding_rate_bot import FundingRateBot
@@ -53,6 +54,8 @@ BOT_REGISTRY = {
                     lambda s: int(s["bots"]["solana_grid"].get("poll_seconds", 10))),
     "solana_sniper": (SolanaSniperBot, "tick",
                       lambda s: int(s.get("bots", {}).get("solana_sniper", {}).get("poll_seconds", 15))),
+    "aave_liquidator": (AaveLiquidatorBot, "tick",
+                        lambda s: int(s.get("bots", {}).get("aave_liquidator", {}).get("poll_seconds", 30))),
 }
 
 

@@ -58,6 +58,32 @@ class Trade(Base):
                 f"{self.profit_usd:+.4f}USD dry={self.dry_run} {self.status}>")
 
 
+class LiquidationOpportunity(Base):
+    """Oportunidade de liquidação Aave detectada (executada ou simulada)."""
+    __tablename__ = "liquidation_opportunities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    position_address: Mapped[str] = mapped_column(String(42), index=True)
+    health_factor: Mapped[float] = mapped_column(Float)
+    debt_asset: Mapped[str] = mapped_column(String(42))
+    debt_amount_usd: Mapped[float] = mapped_column(Float)
+    collateral_asset: Mapped[str] = mapped_column(String(42))
+    collateral_amount_usd: Mapped[float] = mapped_column(Float)
+    liquidation_bonus_pct: Mapped[float] = mapped_column(Float)
+    estimated_profit_usd: Mapped[float] = mapped_column(Float)
+    gas_cost_usd: Mapped[float] = mapped_column(Float)
+    executed: Mapped[bool] = mapped_column(Boolean, default=False)
+    tx_hash: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(24), default="found")
+
+    def __repr__(self) -> str:
+        return (f"<LiquidationOpportunity {self.id} {self.position_address[:10]}… "
+                f"HF={self.health_factor:.4f} profit=${self.estimated_profit_usd:.2f} "
+                f"executed={self.executed}>")
+
+
 class PriceSnapshot(Base):
     """Registo pontual de um preço observado (DEX ou CEX)."""
     __tablename__ = "price_snapshots"
@@ -123,6 +149,44 @@ def record_price(source: str, pair: str, price: float) -> int:
         s.add(snap)
         s.commit()
         return snap.id
+
+
+def record_liquidation_opportunity(
+    *,
+    position_address: str,
+    health_factor: float,
+    debt_asset: str,
+    debt_amount_usd: float,
+    collateral_asset: str,
+    collateral_amount_usd: float,
+    liquidation_bonus_pct: float,
+    estimated_profit_usd: float,
+    gas_cost_usd: float,
+    executed: bool = False,
+    tx_hash: str | None = None,
+    dry_run: bool = True,
+    status: str = "found",
+) -> int:
+    """Insere uma LiquidationOpportunity e devolve o id."""
+    with get_session() as s:
+        opp = LiquidationOpportunity(
+            position_address=position_address,
+            health_factor=health_factor,
+            debt_asset=debt_asset,
+            debt_amount_usd=debt_amount_usd,
+            collateral_asset=collateral_asset,
+            collateral_amount_usd=collateral_amount_usd,
+            liquidation_bonus_pct=liquidation_bonus_pct,
+            estimated_profit_usd=estimated_profit_usd,
+            gas_cost_usd=gas_cost_usd,
+            executed=executed,
+            tx_hash=tx_hash,
+            dry_run=dry_run,
+            status=status,
+        )
+        s.add(opp)
+        s.commit()
+        return opp.id
 
 
 def count_trades() -> int:
