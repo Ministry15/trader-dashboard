@@ -30,7 +30,7 @@ from web3 import Web3
 from web3.exceptions import ContractLogicError
 
 from utils.config import get_env, get_settings
-from utils.database import init_db, record_liquidation_opportunity
+from utils.database import init_db, is_duplicate_liquidation, record_liquidation_opportunity
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
@@ -394,6 +394,10 @@ class AaveLiquidatorBot:
                 continue
             hf, col_usd, debt_usd = data
             if hf >= self.hf_threshold:
+                continue
+
+            if is_duplicate_liquidation(borrower, hf):
+                logger.debug("Dup skip %s HF=%.4f (já registado nas últimas 2h sem variação significativa)", borrower[:10], hf)
                 continue
 
             opp = self._estimate(borrower, hf, col_usd, debt_usd)

@@ -16,8 +16,8 @@ from __future__ import annotations
 import datetime
 import logging
 
-from sqlalchemy import (Boolean, DateTime, Float, Integer, String, create_engine,
-                        func, select)
+from sqlalchemy import (Boolean, DateTime, Float, Index, Integer, String,
+                        create_engine, func, select)
 from sqlalchemy.orm import (DeclarativeBase, Mapped, Session, mapped_column,
                             sessionmaker)
 
@@ -61,6 +61,9 @@ class Trade(Base):
 class LiquidationOpportunity(Base):
     """Oportunidade de liquidação Aave detectada (executada ou simulada)."""
     __tablename__ = "liquidation_opportunities"
+    __table_args__ = (
+        Index("ix_liq_opp_address_ts", "position_address", "ts"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow, index=True)
@@ -149,6 +152,35 @@ def record_price(source: str, pair: str, price: float) -> int:
         s.add(snap)
         s.commit()
         return snap.id
+
+
+def is_duplicate_liquidation(
+    position_address: str,
+    health_factor: float,
+    *,
+    hours: int = 2,
+    hf_delta_pct: float = 0.05,
+) -> bool:
+    """True se já existe registo para o endereço nas últimas `hours` horas
+    com variação de HF <= `hf_delta_pct` (5% por omissão).
+
+    Evita spam na BD durante períodos em que a posição permanece no mesmo estado.
+    """
+    cutoff = _utcnow() - datetime.timedelta(hours=hours)
+    with get_session() as s:
+        existing = s.scalar(
+            select(LiquidationOpportunity)
+            .where(
+                LiquidationOpportunity.position_address == position_address.lower(),
+                LiquidationOpportunity.ts >= cutoff,
+            )
+            .order_by(LiquidationOpportunity.ts.desc())
+            .limit(1)
+        )
+    if existing is None:
+        return False
+    delta = abs(existing.health_factor - health_factor) / max(existing.health_factor, 1e-9)
+    return delta <= hf_delta_pct
 
 
 def record_liquidation_opportunity(
