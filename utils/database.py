@@ -17,7 +17,7 @@ import datetime
 import logging
 
 from sqlalchemy import (Boolean, DateTime, Float, Index, Integer, String,
-                        create_engine, func, select)
+                        create_engine, func, select, text)
 from sqlalchemy.orm import (DeclarativeBase, Mapped, Session, mapped_column,
                             sessionmaker)
 
@@ -131,9 +131,37 @@ def get_session() -> Session:
 
 
 def init_db() -> None:
-    """Cria as tabelas se ainda não existirem."""
+    """Cria as tabelas se ainda não existirem e aplica migrações idempotentes."""
     Base.metadata.create_all(get_engine())
     logger.info("Tabelas garantidas: %s", ", ".join(Base.metadata.tables))
+    migrate_liq_dedup()
+
+
+def migrate_liq_dedup() -> None:
+    """Remove duplicados diários e cria índice único (position_address, date(ts)).
+
+    Idempotente — pode ser chamado várias vezes sem efeito secundário.
+    SQLite não suporta ALTER TABLE ADD UNIQUE; usamos CREATE UNIQUE INDEX com
+    expressão date(ts) que é suportada desde SQLite 3.9+.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        # 1. Limpar duplicados mantendo o registo mais antigo (MIN id) por dia
+        conn.execute(text("""
+            DELETE FROM liquidation_opportunities
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM liquidation_opportunities
+                GROUP BY position_address, date(ts)
+            )
+        """))
+        # 2. Índice único por endereço + dia (expressão — um registo por endereço por dia)
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_liq_opp_addr_day
+            ON liquidation_opportunities(position_address, date(ts))
+        """))
+        conn.commit()
+    logger.info("migrate_liq_dedup: duplicados removidos, índice único garantido")
 
 
 # --- helpers de alto nível ----------------------------------------------------
@@ -154,36 +182,7 @@ def record_price(source: str, pair: str, price: float) -> int:
         return snap.id
 
 
-def is_duplicate_liquidation(
-    position_address: str,
-    health_factor: float,
-    *,
-    hours: int = 2,
-    hf_delta_pct: float = 0.05,
-) -> bool:
-    """True se já existe registo para o endereço nas últimas `hours` horas
-    com variação de HF <= `hf_delta_pct` (5% por omissão).
-
-    Evita spam na BD durante períodos em que a posição permanece no mesmo estado.
-    """
-    cutoff = _utcnow() - datetime.timedelta(hours=hours)
-    with get_session() as s:
-        existing = s.scalar(
-            select(LiquidationOpportunity)
-            .where(
-                LiquidationOpportunity.position_address == position_address.lower(),
-                LiquidationOpportunity.ts >= cutoff,
-            )
-            .order_by(LiquidationOpportunity.ts.desc())
-            .limit(1)
-        )
-    if existing is None:
-        return False
-    delta = abs(existing.health_factor - health_factor) / max(existing.health_factor, 1e-9)
-    return delta <= hf_delta_pct
-
-
-def record_liquidation_opportunity(
+def upsert_liquidation_opportunity(
     *,
     position_address: str,
     health_factor: float,
@@ -198,11 +197,41 @@ def record_liquidation_opportunity(
     tx_hash: str | None = None,
     dry_run: bool = True,
     status: str = "found",
-) -> int:
-    """Insere uma LiquidationOpportunity e devolve o id."""
+) -> tuple[int, bool]:
+    """INSERT se não existe registo hoje para o endereço; UPDATE caso contrário.
+
+    Devolve (id, inserted) — inserted=True em INSERT, False em UPDATE.
+    Garante um único registo por (position_address, dia UTC).
+    """
+    today = _utcnow().date().isoformat()
+    addr  = position_address.lower()
+
     with get_session() as s:
+        existing = s.scalar(
+            select(LiquidationOpportunity)
+            .where(
+                LiquidationOpportunity.position_address == addr,
+                func.date(LiquidationOpportunity.ts) == today,
+            )
+            .limit(1)
+        )
+
+        if existing is not None:
+            existing.health_factor        = health_factor
+            existing.debt_amount_usd      = debt_amount_usd
+            existing.collateral_amount_usd = collateral_amount_usd
+            existing.estimated_profit_usd = estimated_profit_usd
+            existing.gas_cost_usd         = gas_cost_usd
+            existing.ts                   = _utcnow()
+            if executed:
+                existing.executed = True
+                existing.tx_hash  = tx_hash
+                existing.status   = status
+            s.commit()
+            return existing.id, False
+
         opp = LiquidationOpportunity(
-            position_address=position_address,
+            position_address=addr,
             health_factor=health_factor,
             debt_asset=debt_asset,
             debt_amount_usd=debt_amount_usd,
@@ -218,7 +247,7 @@ def record_liquidation_opportunity(
         )
         s.add(opp)
         s.commit()
-        return opp.id
+        return opp.id, True
 
 
 def count_trades() -> int:

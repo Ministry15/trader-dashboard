@@ -30,7 +30,7 @@ from web3 import Web3
 from web3.exceptions import ContractLogicError
 
 from utils.config import get_env, get_settings
-from utils.database import init_db, is_duplicate_liquidation, record_liquidation_opportunity
+from utils.database import init_db, upsert_liquidation_opportunity
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
@@ -325,7 +325,7 @@ class AaveLiquidatorBot:
 
     def _record(self, opp: LiqOpportunity, executed: bool,
                 tx_hash: str | None = None) -> None:
-        record_liquidation_opportunity(
+        rec_id, inserted = upsert_liquidation_opportunity(
             position_address=opp.borrower,
             health_factor=opp.health_factor,
             debt_asset=opp.debt_asset,
@@ -340,6 +340,8 @@ class AaveLiquidatorBot:
             dry_run=self.dry_run,
             status="dry_run" if self.dry_run else ("executed" if executed else "skipped"),
         )
+        action = "INSERT" if inserted else "UPDATE"
+        logger.debug("BD %s id=%d %s HF=%.4f", action, rec_id, opp.borrower[:10], opp.health_factor)
 
     def _execute_live(self, opp: LiqOpportunity) -> str | None:
         """Executa flash loan liquidation via contrato deployado."""
@@ -394,10 +396,6 @@ class AaveLiquidatorBot:
                 continue
             hf, col_usd, debt_usd = data
             if hf >= self.hf_threshold:
-                continue
-
-            if is_duplicate_liquidation(borrower, hf):
-                logger.debug("Dup skip %s HF=%.4f (já registado nas últimas 2h sem variação significativa)", borrower[:10], hf)
                 continue
 
             opp = self._estimate(borrower, hf, col_usd, debt_usd)
