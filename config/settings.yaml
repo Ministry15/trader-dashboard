@@ -145,22 +145,25 @@ bots:
     base: "WBNB"
     quote: "USDT"
     dex: "pancakeswap_v2"
-    lower_price: 600          # limite inferior da grelha (quote por base)
-    upper_price: 800          # limite superior
-    grid_levels: 10           # nº de linhas da grelha
-    order_size_quote: 50      # tamanho de cada ordem, em quote
+    range_pct: 0.15           # ±15% do preço actual (Binance BNB/USDT)
+    grid_levels: 20
+    order_size_quote: 10      # $10 por ordem
     poll_seconds: 10
-    recenter_threshold_pct: 5 # recentra se preço sair do range em >5%
+    recenter_threshold_pct: 50
+    price_source: "binance"
+    binance_symbol: "BNBUSDT"
 
   pepe_grid:
     base: "PEPE"
     quote: "USDT"
     dex: "pancakeswap_v2"
-    range_pct: 0.20           # ±20% do preço live no arranque (PEPE mais volátil)
-    grid_levels: 20           # 20 níveis
+    range_pct: 0.20           # ±20% do preço actual (Binance PEPE/USDT)
+    grid_levels: 20
     order_size_quote: 5       # $5 por ordem
     poll_seconds: 10
-    recenter_threshold_pct: 5 # recentra se preço sair do range em >5%
+    recenter_threshold_pct: 50
+    price_source: "binance"
+    binance_symbol: "PEPEUSDT"
 
   dca:
     base: "WBNB"
@@ -177,7 +180,7 @@ bots:
     grid_levels: 20
     order_size_quote: 5       # $5 por ordem
     poll_seconds: 10
-    recenter_threshold_pct: 5 # recentra se preço sair do range em >5%
+    recenter_threshold_pct: 50
 
   sniper:
     quote: "USDT"             # novos tokens BSC usam USDT como quote (não WBNB)
@@ -222,7 +225,7 @@ bots:
 
   aave_liquidator:
     poll_seconds: 30                  # intervalo de scan (s)
-    health_factor_threshold: 1.05     # monitorizar posições com HF abaixo disto
+    health_factor_threshold: 1.2      # monitorizar posições com HF abaixo disto
     min_profit_usd: 5.0               # só executar se lucro líquido > $5 (DRY_RUN ignora)
     max_positions_per_tick: 50        # máx. posições a verificar por tick
     borrower_scan_blocks: 50000       # janela de blocos para descobrir mutuários (~14h em Base)

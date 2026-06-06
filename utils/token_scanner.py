@@ -138,7 +138,10 @@ def scan(cfg: dict) -> list[str]:
     """
     min_vol = float(cfg.get("min_volume_usd", 100_000))
     min_liq = float(cfg.get("min_liquidity_usd", 50_000))
-    max_age_days = int(cfg.get("max_age_days", 7))
+    if "max_age_hours" in cfg:
+        max_age_hours = float(cfg["max_age_hours"])
+    else:
+        max_age_hours = int(cfg.get("max_age_days", 7)) * 24
     safety_check = bool(cfg.get("safety_check", True))
     require_goplus = bool(cfg.get("safety_require_goplus", False))
     blacklist = {a.lower() for a in cfg.get("blacklist", [])}
@@ -184,13 +187,13 @@ def scan(cfg: dict) -> list[str]:
 
             # Idade do pool — tracking para early exit
             created_str = attr.get("pool_created_at", "")
-            age_days = None
+            age_hours = None
             if created_str:
                 try:
                     created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
-                    age_days = (now - created_at).days
-                    page_youngest_age.append(age_days)
-                    if age_days > max_age_days:
+                    age_hours = (now - created_at).total_seconds() / 3600
+                    page_youngest_age.append(age_hours)
+                    if age_hours > max_age_hours:
                         continue
                 except ValueError:
                     pass
@@ -218,13 +221,13 @@ def scan(cfg: dict) -> list[str]:
         if len(candidates) >= max_tokens * 4:
             break
         # Se todos os pools da página são mais velhos que max_age_days, parar
-        if page_youngest_age and min(page_youngest_age) > max_age_days:
+        if page_youngest_age and min(page_youngest_age) > max_age_hours:
             break
         time.sleep(1.5)  # evitar rate limit entre páginas
 
     logger.info(
-        "Scanner: %d candidatos (vol≥$%.0fk, liq≥$%.0fk, idade≤%dd)",
-        len(candidates), min_vol / 1000, min_liq / 1000, max_age_days,
+        "Scanner: %d candidatos (vol≥$%.0fk, liq≥$%.0fk, idade≤%.1fh)",
+        len(candidates), min_vol / 1000, min_liq / 1000, max_age_hours,
     )
 
     if not candidates:
