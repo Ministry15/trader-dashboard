@@ -53,12 +53,14 @@ const SHARED_CSS = `
   .tag{display:inline-block;padding:1px 7px;border-radius:2px;font-size:10px;font-weight:700;letter-spacing:.06em;margin:0 3px}
   .ok{background:rgba(0,255,136,.1);color:#00ff88;border:1px solid rgba(0,255,136,.25)}
   .warn{background:rgba(255,204,0,.1);color:#fc0;border:1px solid rgba(255,204,0,.25)}
+  .alrt{background:rgba(255,120,0,.12);color:#ff7800;border:1px solid rgba(255,120,0,.3)}
   .err{background:rgba(255,51,85,.1);color:#ff3355;border:1px solid rgba(255,51,85,.25)}
   .cards{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .card{background:#161616;border:1px solid #1a1a1a;border-radius:3px;padding:10px 16px;min-width:140px}
   .card-lbl{font-size:10px;color:#555;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
   .card-val{font-size:20px;font-weight:700;color:#00ff88}
   .card-val.warn{color:#fc0}
+  .card-val.alrt{color:#ff7800}
   .card-val.err{color:#ff3355}
   .rec-list{list-style:none;counter-reset:rec;padding:0}
   .rec-list li{counter-increment:rec;padding:10px 0;border-bottom:1px solid #1a1a1a;font-size:12px;color:#ccffe6}
@@ -94,14 +96,20 @@ function buildRulesHtml(data) {
   const gridHtml = gridRows || '<div class="none">Sem dados de grid activos.</div>';
 
   // ── Liquidations ────────────────────────────────────────────────────────────
-  const opps    = liquidations?.opportunities ?? [];
-  const urgent  = opps.filter(o => parseFloat(o.health_factor) < 1.1);
-  const monitor = opps.filter(o => { const hf = parseFloat(o.health_factor); return hf >= 1.1 && hf < 1.2; });
+  const allOpps    = liquidations?.opportunities ?? [];
+  // HF > 1.2 → saudável, não mostrar
+  const opps    = allOpps.filter(o => parseFloat(o.health_factor) < 1.2);
+  const urgent  = opps.filter(o => parseFloat(o.health_factor) < 1.0);
+  const alrt    = opps.filter(o => { const hf = parseFloat(o.health_factor); return hf >= 1.0 && hf < 1.05; });
+  const monitor = opps.filter(o => { const hf = parseFloat(o.health_factor); return hf >= 1.05 && hf < 1.2; });
   const totalEstProfit = liquidations?.summary?.total_est_profit ?? opps.reduce((s, o) => s + parseFloat(o.estimated_profit ?? 0), 0);
 
   let liqRows = '';
   for (const o of urgent) {
     liqRows += `<div class="row"><div class="row-name"><span class="tag err">URGENTE</span></div><div class="row-body"><span style="font-size:11px;color:#888">${(o.position_address ?? '').slice(0, 14)}…</span> HF=<b style="color:#ff3355">${parseFloat(o.health_factor).toFixed(4)}</b> dívida=${fmtUSD(o.debt_usd)} lucro≈${fmtUSD(o.estimated_profit)}</div></div>`;
+  }
+  for (const o of alrt) {
+    liqRows += `<div class="row"><div class="row-name"><span class="tag alrt">ALERTA</span></div><div class="row-body"><span style="font-size:11px;color:#888">${(o.position_address ?? '').slice(0, 14)}…</span> HF=<b style="color:#ff7800">${parseFloat(o.health_factor).toFixed(4)}</b> dívida=${fmtUSD(o.debt_usd)} lucro≈${fmtUSD(o.estimated_profit)}</div></div>`;
   }
   for (const o of monitor) {
     liqRows += `<div class="row"><div class="row-name"><span class="tag warn">MONITOR</span></div><div class="row-body"><span style="font-size:11px;color:#888">${(o.position_address ?? '').slice(0, 14)}…</span> HF=<b style="color:#fc0">${parseFloat(o.health_factor).toFixed(4)}</b> dívida=${fmtUSD(o.debt_usd)} lucro≈${fmtUSD(o.estimated_profit)}</div></div>`;
@@ -109,16 +117,18 @@ function buildRulesHtml(data) {
 
   const liqCards = `
     <div class="cards">
-      <div class="card"><div class="card-lbl">HF &lt; 1.1 — Urgente</div><div class="card-val${urgent.length > 0 ? ' err' : ''}">${urgent.length}</div></div>
-      <div class="card"><div class="card-lbl">HF 1.1–1.2 — Monitor</div><div class="card-val${monitor.length > 0 ? ' warn' : ''}">${monitor.length}</div></div>
-      <div class="card"><div class="card-lbl">Total Detectadas</div><div class="card-val">${opps.length}</div></div>
+      <div class="card"><div class="card-lbl">HF &lt; 1.0 — Urgente</div><div class="card-val${urgent.length > 0 ? ' err' : ''}">${urgent.length}</div></div>
+      <div class="card"><div class="card-lbl">HF 1.0–1.05 — Alerta</div><div class="card-val${alrt.length > 0 ? ' alrt' : ''}">${alrt.length}</div></div>
+      <div class="card"><div class="card-lbl">HF 1.05–1.2 — Monitor</div><div class="card-val${monitor.length > 0 ? ' warn' : ''}">${monitor.length}</div></div>
       <div class="card"><div class="card-lbl">Lucro Estimado</div><div class="card-val">${fmtUSD(totalEstProfit)}</div></div>
-    </div>${liqRows || '<div class="none">Sem oportunidades activas.</div>'}`;
+    </div>${liqRows || '<div class="none">Sem posições em risco (HF &lt; 1.2).</div>'}`;
 
   if (urgent.length > 0)
-    recs.push(`${urgent.length} posição(ões) Aave com HF&lt;1.1 — liquidação urgente (lucro estimado total: ${fmtUSD(urgent.reduce((s,o) => s + parseFloat(o.estimated_profit ?? 0), 0))}).`);
+    recs.push(`${urgent.length} posição(ões) Aave com HF&lt;1.0 — liquidável AGORA (lucro estimado: ${fmtUSD(urgent.reduce((s,o) => s + parseFloat(o.estimated_profit ?? 0), 0))}).`);
+  if (alrt.length > 0)
+    recs.push(`${alrt.length} posição(ões) Aave com HF 1.0–1.05 — liquidação iminente, activar bot em modo live.`);
   if (monitor.length > 0)
-    recs.push(`${monitor.length} posição(ões) Aave com HF 1.1–1.2 — monitorizar de perto nas próximas horas.`);
+    recs.push(`${monitor.length} posição(ões) Aave com HF 1.05–1.2 — monitorizar de perto nas próximas horas.`);
 
   // ── Sniper ──────────────────────────────────────────────────────────────────
   const winRate  = sniper?.win_rate ?? null;
@@ -182,7 +192,7 @@ function buildRulesHtml(data) {
     ? `<ul class="rec-list">${top5.map(r => `<li>${r}</li>`).join('')}</ul>`
     : '<div class="none">Sistema a operar normalmente — sem recomendações urgentes.</div>';
 
-  const liqOpen = urgent.length > 0 || monitor.length > 0;
+  const liqOpen = urgent.length > 0 || alrt.length > 0 || monitor.length > 0;
   const sysOpen = failed.length > 0 || (cpu != null && cpu >= 70) || (ram != null && ram >= 70);
 
   return `<!DOCTYPE html>
@@ -198,7 +208,7 @@ function buildRulesHtml(data) {
   </details>
 
   <details ${liqOpen ? 'open' : ''}>
-    <summary>Liquidações Aave V3 ${urgent.length > 0 ? `<span class="tag err">${urgent.length} URGENTE</span>` : ''}</summary>
+    <summary>Liquidações Aave V3 ${urgent.length > 0 ? `<span class="tag err">${urgent.length} URGENTE</span>` : alrt.length > 0 ? `<span class="tag alrt">${alrt.length} ALERTA</span>` : ''}</summary>
     <div class="sec-body">${liqCards}</div>
   </details>
 
