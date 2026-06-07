@@ -692,6 +692,7 @@ function LiquidationsTab({ data }) {
   if (!data) return <Loader />;
   const opps    = data.opportunities ?? [];
   const summary = data.summary       ?? {};
+  const totalEstProfit = opps.reduce((s, o) => s + (Number(o.estimated_profit) || 0), 0);
   return (
     <div>
       <div className="kpi-row">
@@ -705,8 +706,8 @@ function LiquidationsTab({ data }) {
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Lucro Estimado</div>
-          <div className={`kpi-value ${clr(summary.total_est_profit)}`}>
-            {fmtUSD(summary.total_est_profit)}
+          <div className={`kpi-value ${clr(totalEstProfit)}`}>
+            {fmtUSD(totalEstProfit)}
           </div>
         </div>
         <div className="kpi-card">
