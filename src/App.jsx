@@ -718,8 +718,8 @@ function LiquidationsTab({ data }) {
         {fmt(o.health_factor, 4)}
       </td>
       <td>{fmtUSD(o.debt_usd)}</td>
-      <td className={isLiquidable ? 'pos' : ''} style={isLiquidable ? {} : { color: '#555' }}>
-        {fmtUSD(isLiquidable ? o.estimated_profit : 0)}
+      <td className={isLiquidable ? 'pos' : ''} style={isLiquidable ? {} : { color: '#4a7a4a' }}>
+        {fmtUSD(o.estimated_profit)}
       </td>
     </tr>
   );
