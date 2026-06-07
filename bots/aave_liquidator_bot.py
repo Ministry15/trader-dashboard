@@ -165,7 +165,7 @@ class AaveLiquidatorBot:
 
         rpc_url = get_env("ALCHEMY_BASE_URL") or "https://mainnet.base.org"
         self.dry_run     : bool  = str(get_env("DRY_RUN", "true")).lower() not in ("false", "0", "no")
-        self.hf_threshold: float = float(self.cfg.get("health_factor_threshold", 1.05))
+        self.hf_threshold: float = float(self.cfg.get("health_factor_threshold", 1.0))
         self.min_profit  : float = float(self.cfg.get("min_profit_usd", 5.0))
         self.scan_blocks : int   = int(self.cfg.get("borrower_scan_blocks", 50_000))
         self.max_per_tick: int   = int(self.cfg.get("max_positions_per_tick", 50))
