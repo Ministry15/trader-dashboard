@@ -692,7 +692,7 @@ function LiquidationsPanel({ data }) {
   if (!data) return <Loader />;
   const opps    = data.opportunities ?? [];
   const summary = data.summary       ?? {};
-  const totalEstProfit = opps.reduce((s, o) => s + (Number(o.estimated_profit) || 0), 0);
+  const totalEstProfit = Number(summary.total_est_profit) || 0;
 
   const [minProfit,  setMinProfit]  = useState('25');
   const [dateFilter, setDateFilter] = useState('hoje');
@@ -820,11 +820,21 @@ function LiquidationsPanel({ data }) {
 function LiquidationsTab({ dataBase, dataPolygon }) {
   const [subTab, setSubTab] = useState('base');
 
-  const subBtnStyle = (id) => ({
-    padding: '0.35rem 1.1rem', borderRadius: 4, border: 'none', cursor: 'pointer',
-    fontSize: '0.9em', fontWeight: subTab === id ? 700 : 400,
-    background: subTab === id ? '#fff' : '#2a2a2a',
-    color: subTab === id ? '#111' : '#aaa',
+  const CHAINS = [
+    { id: 'base',    label: 'Base',    activeColor: '#2d6ae0' },
+    { id: 'polygon', label: 'Polygon', activeColor: '#8247e5' },
+  ];
+
+  const subBtnStyle = (id, activeColor) => ({
+    padding: '0.4rem 1.3rem',
+    borderRadius: 4,
+    border: subTab === id ? `2px solid ${activeColor}` : '2px solid transparent',
+    cursor: 'pointer',
+    fontSize: '0.9em',
+    fontWeight: subTab === id ? 700 : 400,
+    background: subTab === id ? activeColor : '#2a2a2a',
+    color: '#fff',
+    transition: 'background 0.15s',
   });
 
   const active = subTab === 'base' ? dataBase : dataPolygon;
@@ -832,12 +842,17 @@ function LiquidationsTab({ dataBase, dataPolygon }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '1px solid #333', paddingBottom: '0.75rem' }}>
-        <button onClick={() => setSubTab('base')}    style={subBtnStyle('base')}>Base</button>
-        <button onClick={() => setSubTab('polygon')} style={subBtnStyle('polygon')}>Polygon</button>
+        {CHAINS.map(({ id, label, activeColor }) => (
+          <button key={id} onClick={() => setSubTab(id)} style={subBtnStyle(id, activeColor)}>
+            {label}
+          </button>
+        ))}
       </div>
-      {subTab === 'polygon' && !active
-        ? <div style={{ color: '#888', padding: '2rem 0', textAlign: 'center' }}>A configurar…</div>
-        : <LiquidationsPanel data={active} />
+      {!active
+        ? <div style={{ color: '#888', padding: '2rem 0', textAlign: 'center' }}>
+            Sem dados {subTab === 'polygon' ? 'Polygon' : 'Base'} ainda
+          </div>
+        : <LiquidationsPanel key={subTab} data={active} />
       }
     </div>
   );
