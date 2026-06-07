@@ -694,10 +694,28 @@ function LiquidationsTab({ data }) {
   const summary = data.summary       ?? {};
   const totalEstProfit = opps.reduce((s, o) => s + (Number(o.estimated_profit) || 0), 0);
 
-  const [minProfit, setMinProfit] = useState('25');
+  const [minProfit,  setMinProfit]  = useState('25');
+  const [dateFilter, setDateFilter] = useState('hoje');
 
-  const liquidable = opps.filter(o => o.health_factor < 1.0);
-  const watching   = opps.filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2)
+  const _now   = new Date();
+  const _today = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
+  const _dateThreshold = {
+    hoje:   _today,
+    ontem:  new Date(_today - 86400000),
+    '7dias': new Date(_today - 6 * 86400000),
+    tudo:   null,
+  }[dateFilter];
+
+  const inRange = (o) => {
+    if (!_dateThreshold) return true;
+    const ts = new Date(o.ts);
+    if (dateFilter === 'ontem') return ts >= new Date(_today - 86400000) && ts < _today;
+    return ts >= _dateThreshold;
+  };
+
+  const filteredOpps = opps.filter(inRange);
+  const liquidable = filteredOpps.filter(o => o.health_factor < 1.0);
+  const watching   = filteredOpps.filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2)
                         .filter(o => (Number(o.estimated_profit) || 0) >= (Number(minProfit) || 0))
                         .sort((a, b) => a.health_factor - b.health_factor);
 
@@ -752,8 +770,19 @@ function LiquidationsTab({ data }) {
         </div>
       </div>
 
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+        {[['hoje','Hoje'],['ontem','Ontem'],['7dias','7 dias'],['tudo','Tudo']].map(([val, label]) => (
+          <button key={val} onClick={() => setDateFilter(val)} style={{
+            padding: '0.3rem 0.8rem', borderRadius: 4, border: 'none', cursor: 'pointer',
+            fontSize: '0.85em', fontWeight: dateFilter === val ? 700 : 400,
+            background: dateFilter === val ? '#e8b800' : '#2a2a2a',
+            color: dateFilter === val ? '#111' : '#ccc',
+          }}>{label}</button>
+        ))}
+      </div>
+
       <div style={{ marginBottom: '1rem', background: '#1a0000', borderRadius: 6, padding: '0.75rem 1rem' }}>
-        <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>🔴 Liquidáveis Agora</div>
+        <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>🔴 Liquidáveis Agora ({liquidable.length})</div>
         {liquidable.length === 0 ? (
           <div style={{ color: '#888', fontSize: '0.9em' }}>Sem posições liquidáveis agora</div>
         ) : (
@@ -763,7 +792,7 @@ function LiquidationsTab({ data }) {
 
       <div style={{ background: '#1a1500', borderRadius: 6, padding: '0.75rem 1rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-          <span style={{ fontWeight: 700 }}>🟡 Em Vigilância</span>
+          <span style={{ fontWeight: 700 }}>🟡 Em Vigilância ({watching.length})</span>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85em', color: '#ccc' }}>
             Lucro mín. $
             <input
