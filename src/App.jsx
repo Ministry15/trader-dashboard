@@ -1118,7 +1118,7 @@ export default function App() {
       apiFetch('/api/system'),
       apiFetch('/api/flash-arb'),
       apiFetch('/api/liquidations'),
-      apiFetch('/api/liquidations?chain=polygon'),
+      apiFetch('/api/liquidations/polygon'),
     ]);
     if (pnlR.status                === 'fulfilled') setPnl(pnlR.value);                           else errs.pnl          = pnlR.reason?.message;
     if (ibkrR.status               === 'fulfilled') setIbkr(ibkrR.value);                         else errs.ibkr         = ibkrR.reason?.message;
