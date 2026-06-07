@@ -694,11 +694,11 @@ function LiquidationsTab({ data }) {
   const summary = data.summary       ?? {};
   const totalEstProfit = opps.reduce((s, o) => s + (Number(o.estimated_profit) || 0), 0);
 
-  const [minProfit, setMinProfit] = useState(25);
+  const [minProfit, setMinProfit] = useState('25');
 
   const liquidable = opps.filter(o => o.health_factor < 1.0);
   const watching   = opps.filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2)
-                        .filter(o => (Number(o.estimated_profit) || 0) >= minProfit)
+                        .filter(o => (Number(o.estimated_profit) || 0) >= (Number(minProfit) || 0))
                         .sort((a, b) => a.health_factor - b.health_factor);
 
   const thead = (
@@ -771,7 +771,9 @@ function LiquidationsTab({ data }) {
               min="0"
               step="5"
               value={minProfit}
-              onChange={e => setMinProfit(Number(e.target.value))}
+              onChange={e => setMinProfit(e.target.value)}
+              onFocus={() => setMinProfit('')}
+              onBlur={e => { if (e.target.value.trim() === '') setMinProfit('25'); }}
               style={{ width: '5rem', padding: '0.2rem 0.4rem', borderRadius: 4, border: '1px solid #555', background: '#111', color: '#fff', fontSize: '0.9em' }}
             />
           </label>
