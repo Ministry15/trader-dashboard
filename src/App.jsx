@@ -695,7 +695,8 @@ function LiquidationsTab({ data }) {
   const totalEstProfit = opps.reduce((s, o) => s + (Number(o.estimated_profit) || 0), 0);
 
   const liquidable = opps.filter(o => o.health_factor < 1.0);
-  const watching   = opps.filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2);
+  const watching   = opps.filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2)
+                        .sort((a, b) => a.health_factor - b.health_factor);
 
   const thead = (
     <thead>
