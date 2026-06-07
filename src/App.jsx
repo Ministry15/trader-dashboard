@@ -701,21 +701,16 @@ function LiquidationsTab({ data }) {
   const thead = (
     <thead>
       <tr>
-        <th>Timestamp</th>
         <th>Posição</th>
         <th>HF</th>
         <th>Dívida USD</th>
         <th>Lucro Est.</th>
-        <th>Bonus</th>
-        <th>Status</th>
-        <th>TX</th>
       </tr>
     </thead>
   );
 
   const renderRow = (o, i, isLiquidable) => (
     <tr key={i}>
-      <td>{o.ts ? o.ts.slice(0, 19).replace('T', ' ') : '—'}</td>
       <td title={o.position_address}>
         {o.position_address ? o.position_address.slice(0, 10) + '…' : '—'}
       </td>
@@ -726,13 +721,6 @@ function LiquidationsTab({ data }) {
       <td className={isLiquidable ? 'pos' : ''} style={isLiquidable ? {} : { color: '#555' }}>
         {fmtUSD(isLiquidable ? o.estimated_profit : 0)}
       </td>
-      <td>{o.bonus_pct != null ? `${o.bonus_pct}%` : '—'}</td>
-      <td>
-        <span className={o.executed ? 'pos' : ''}>
-          {o.dry_run ? '[dry] ' : ''}{o.status ?? '—'}
-        </span>
-      </td>
-      <td>{o.tx_hash ? o.tx_hash.slice(0, 12) + '…' : '—'}</td>
     </tr>
   );
 
@@ -766,14 +754,14 @@ function LiquidationsTab({ data }) {
         {liquidable.length === 0 ? (
           <div style={{ color: '#888', fontSize: '0.9em' }}>Sem posições liquidáveis agora</div>
         ) : (
-          <table>{thead}<tbody>{liquidable.map((o, i) => renderRow(o, i, true))}</tbody></table>
+          <div style={{ overflowX: 'auto' }}><table>{thead}<tbody>{liquidable.map((o, i) => renderRow(o, i, true))}</tbody></table></div>
         )}
       </div>
 
       {watching.length > 0 && (
         <div style={{ background: '#1a1500', borderRadius: 6, padding: '0.75rem 1rem' }}>
           <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>🟡 Em Vigilância</div>
-          <table>{thead}<tbody>{watching.map((o, i) => renderRow(o, i, false))}</tbody></table>
+          <div style={{ overflowX: 'auto' }}><table>{thead}<tbody>{watching.map((o, i) => renderRow(o, i, false))}</tbody></table></div>
         </div>
       )}
     </div>
