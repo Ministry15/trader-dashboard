@@ -688,7 +688,7 @@ const LOG_SERVICES = [
 ];
 
 // ─── LIQUIDATIONS TAB ─────────────────────────────────────────────────────────
-function LiquidationsTab({ data }) {
+function LiquidationsPanel({ data }) {
   if (!data) return <Loader />;
   const opps    = data.opportunities ?? [];
   const summary = data.summary       ?? {};
@@ -813,6 +813,32 @@ function LiquidationsTab({ data }) {
           <div style={{ overflowX: 'auto' }}><table>{thead}<tbody>{watching.map((o, i) => renderRow(o, i, false))}</tbody></table></div>
         )}
       </div>
+    </div>
+  );
+}
+
+function LiquidationsTab({ dataBase, dataPolygon }) {
+  const [subTab, setSubTab] = useState('base');
+
+  const subBtnStyle = (id) => ({
+    padding: '0.35rem 1.1rem', borderRadius: 4, border: 'none', cursor: 'pointer',
+    fontSize: '0.9em', fontWeight: subTab === id ? 700 : 400,
+    background: subTab === id ? '#fff' : '#2a2a2a',
+    color: subTab === id ? '#111' : '#aaa',
+  });
+
+  const active = subTab === 'base' ? dataBase : dataPolygon;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '1px solid #333', paddingBottom: '0.75rem' }}>
+        <button onClick={() => setSubTab('base')}    style={subBtnStyle('base')}>Base</button>
+        <button onClick={() => setSubTab('polygon')} style={subBtnStyle('polygon')}>Polygon</button>
+      </div>
+      {subTab === 'polygon' && !active
+        ? <div style={{ color: '#888', padding: '2rem 0', textAlign: 'center' }}>A configurar…</div>
+        : <LiquidationsPanel data={active} />
+      }
     </div>
   );
 }
@@ -1061,13 +1087,14 @@ export default function App() {
   const [grid,     setGrid]     = useState(null);
   const [funding,  setFunding]  = useState(null);
   const [system,   setSystem]   = useState(null);
-  const [flashArb,     setFlashArb]     = useState(null);
-  const [liquidations, setLiquidations] = useState(null);
+  const [flashArb,            setFlashArb]            = useState(null);
+  const [liquidations,        setLiquidations]        = useState(null);
+  const [liquidationsPolygon, setLiquidationsPolygon] = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
@@ -1076,15 +1103,17 @@ export default function App() {
       apiFetch('/api/system'),
       apiFetch('/api/flash-arb'),
       apiFetch('/api/liquidations'),
+      apiFetch('/api/liquidations?chain=polygon'),
     ]);
-    if (pnlR.status          === 'fulfilled') setPnl(pnlR.value);               else errs.pnl          = pnlR.reason?.message;
-    if (ibkrR.status         === 'fulfilled') setIbkr(ibkrR.value);             else errs.ibkr         = ibkrR.reason?.message;
-    if (sniperR.status       === 'fulfilled') setSniper(sniperR.value);         else errs.sniper       = sniperR.reason?.message;
-    if (gridR.status         === 'fulfilled') setGrid(gridR.value);             else errs.grid         = gridR.reason?.message;
-    if (fundingR.status      === 'fulfilled') setFunding(fundingR.value);       else errs.funding      = fundingR.reason?.message;
-    if (systemR.status       === 'fulfilled') setSystem(systemR.value);         else errs.system       = systemR.reason?.message;
-    if (flashArbR.status     === 'fulfilled') setFlashArb(flashArbR.value);     else errs.flashArb     = flashArbR.reason?.message;
-    if (liquidationsR.status === 'fulfilled') setLiquidations(liquidationsR.value); else errs.liquidations = liquidationsR.reason?.message;
+    if (pnlR.status                === 'fulfilled') setPnl(pnlR.value);                           else errs.pnl          = pnlR.reason?.message;
+    if (ibkrR.status               === 'fulfilled') setIbkr(ibkrR.value);                         else errs.ibkr         = ibkrR.reason?.message;
+    if (sniperR.status             === 'fulfilled') setSniper(sniperR.value);                     else errs.sniper       = sniperR.reason?.message;
+    if (gridR.status               === 'fulfilled') setGrid(gridR.value);                         else errs.grid         = gridR.reason?.message;
+    if (fundingR.status            === 'fulfilled') setFunding(fundingR.value);                   else errs.funding      = fundingR.reason?.message;
+    if (systemR.status             === 'fulfilled') setSystem(systemR.value);                     else errs.system       = systemR.reason?.message;
+    if (flashArbR.status           === 'fulfilled') setFlashArb(flashArbR.value);                 else errs.flashArb     = flashArbR.reason?.message;
+    if (liquidationsR.status       === 'fulfilled') setLiquidations(liquidationsR.value);         else errs.liquidations = liquidationsR.reason?.message;
+    if (liquidationsPolygonR.status === 'fulfilled') setLiquidationsPolygon(liquidationsPolygonR.value);
     setErrors(errs);
     setOnline(Object.keys(errs).length < 7);
     setLoading(false);
@@ -1171,7 +1200,7 @@ export default function App() {
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
         {activeTab === 'funding'  && (errors.funding ? <Err msg={errors.funding} /> : <FundingTab data={funding} />)}
         {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
-        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab data={liquidations} />)}
+        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} />)}
         {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
