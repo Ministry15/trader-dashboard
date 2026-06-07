@@ -693,6 +693,46 @@ function LiquidationsTab({ data }) {
   const opps    = data.opportunities ?? [];
   const summary = data.summary       ?? {};
   const totalEstProfit = opps.reduce((s, o) => s + (Number(o.estimated_profit) || 0), 0);
+
+  const liquidable = opps.filter(o => o.health_factor < 1.0);
+  const watching   = opps.filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2);
+
+  const thead = (
+    <thead>
+      <tr>
+        <th>Timestamp</th>
+        <th>Posição</th>
+        <th>HF</th>
+        <th>Dívida USD</th>
+        <th>Bonus</th>
+        <th>Lucro Est.</th>
+        <th>Status</th>
+        <th>TX</th>
+      </tr>
+    </thead>
+  );
+
+  const renderRow = (o, i) => (
+    <tr key={i}>
+      <td>{o.ts ? o.ts.slice(0, 19).replace('T', ' ') : '—'}</td>
+      <td title={o.position_address}>
+        {o.position_address ? o.position_address.slice(0, 10) + '…' : '—'}
+      </td>
+      <td className={o.health_factor < 1.0 ? 'neg' : 'pos'}>
+        {fmt(o.health_factor, 4)}
+      </td>
+      <td>{fmtUSD(o.debt_usd)}</td>
+      <td>{o.bonus_pct != null ? `${o.bonus_pct}%` : '—'}</td>
+      <td className={clr(o.estimated_profit)}>{fmtUSD(o.estimated_profit)}</td>
+      <td>
+        <span className={o.executed ? 'pos' : ''}>
+          {o.dry_run ? '[dry] ' : ''}{o.status ?? '—'}
+        </span>
+      </td>
+      <td>{o.tx_hash ? o.tx_hash.slice(0, 12) + '…' : '—'}</td>
+    </tr>
+  );
+
   return (
     <div>
       <div className="kpi-row">
@@ -717,45 +757,21 @@ function LiquidationsTab({ data }) {
           </div>
         </div>
       </div>
-      {opps.length === 0 ? (
-        <div className="err-box">Sem oportunidades registadas. Bot a monitorizar Aave V3 Base...</div>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>Posição</th>
-              <th>HF</th>
-              <th>Dívida USD</th>
-              <th>Bonus</th>
-              <th>Lucro Est.</th>
-              <th>Status</th>
-              <th>TX</th>
-            </tr>
-          </thead>
-          <tbody>
-            {opps.map((o, i) => (
-              <tr key={i} className={o.health_factor < 1.0 ? 'neg' : ''}>
-                <td>{o.ts ? o.ts.slice(0, 19).replace('T', ' ') : '—'}</td>
-                <td title={o.position_address}>
-                  {o.position_address ? o.position_address.slice(0, 10) + '…' : '—'}
-                </td>
-                <td className={o.health_factor < 1.0 ? 'neg' : 'pos'}>
-                  {fmt(o.health_factor, 4)}
-                </td>
-                <td>{fmtUSD(o.debt_usd)}</td>
-                <td>{o.bonus_pct != null ? `${o.bonus_pct}%` : '—'}</td>
-                <td className={clr(o.estimated_profit)}>{fmtUSD(o.estimated_profit)}</td>
-                <td>
-                  <span className={o.executed ? 'pos' : ''}>
-                    {o.dry_run ? '[dry] ' : ''}{o.status ?? '—'}
-                  </span>
-                </td>
-                <td>{o.tx_hash ? o.tx_hash.slice(0, 12) + '…' : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+      <div style={{ marginBottom: '1rem', background: '#1a0000', borderRadius: 6, padding: '0.75rem 1rem' }}>
+        <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>🔴 Liquidáveis Agora</div>
+        {liquidable.length === 0 ? (
+          <div style={{ color: '#888', fontSize: '0.9em' }}>Sem posições liquidáveis agora</div>
+        ) : (
+          <table>{thead}<tbody>{liquidable.map(renderRow)}</tbody></table>
+        )}
+      </div>
+
+      {watching.length > 0 && (
+        <div style={{ background: '#1a1500', borderRadius: 6, padding: '0.75rem 1rem' }}>
+          <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>🟡 Em Vigilância</div>
+          <table>{thead}<tbody>{watching.map(renderRow)}</tbody></table>
+        </div>
       )}
     </div>
   );
