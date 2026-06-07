@@ -694,8 +694,11 @@ function LiquidationsTab({ data }) {
   const summary = data.summary       ?? {};
   const totalEstProfit = opps.reduce((s, o) => s + (Number(o.estimated_profit) || 0), 0);
 
+  const [minProfit, setMinProfit] = useState(25);
+
   const liquidable = opps.filter(o => o.health_factor < 1.0);
   const watching   = opps.filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2)
+                        .filter(o => (Number(o.estimated_profit) || 0) >= minProfit)
                         .sort((a, b) => a.health_factor - b.health_factor);
 
   const thead = (
@@ -758,12 +761,27 @@ function LiquidationsTab({ data }) {
         )}
       </div>
 
-      {watching.length > 0 && (
-        <div style={{ background: '#1a1500', borderRadius: 6, padding: '0.75rem 1rem' }}>
-          <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>🟡 Em Vigilância</div>
-          <div style={{ overflowX: 'auto' }}><table>{thead}<tbody>{watching.map((o, i) => renderRow(o, i, false))}</tbody></table></div>
+      <div style={{ background: '#1a1500', borderRadius: 6, padding: '0.75rem 1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+          <span style={{ fontWeight: 700 }}>🟡 Em Vigilância</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85em', color: '#ccc' }}>
+            Lucro mín. $
+            <input
+              type="number"
+              min="0"
+              step="5"
+              value={minProfit}
+              onChange={e => setMinProfit(Number(e.target.value))}
+              style={{ width: '5rem', padding: '0.2rem 0.4rem', borderRadius: 4, border: '1px solid #555', background: '#111', color: '#fff', fontSize: '0.9em' }}
+            />
+          </label>
         </div>
-      )}
+        {watching.length === 0 ? (
+          <div style={{ color: '#888', fontSize: '0.9em' }}>Sem posições em vigilância com lucro ≥ ${minProfit}</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}><table>{thead}<tbody>{watching.map((o, i) => renderRow(o, i, false))}</tbody></table></div>
+        )}
+      </div>
     </div>
   );
 }
