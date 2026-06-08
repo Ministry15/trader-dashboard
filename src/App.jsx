@@ -848,15 +848,45 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
   const active = dataMap[subTab];
   const chainLabel = CHAINS.find(c => c.id === subTab)?.label ?? subTab;
 
+  const DESCRIPTIONS = {
+    base:         'Aave V3 — protocolo de lending líder. Liquidas posições subcapitalizadas e recebes 5–7% de bonus.',
+    polygon:      'Aave V3 na Polygon — gas ultra barato (~$0.01). Mesmo mecanismo do Base com menos competição.',
+    avax:         'Aave V3 na Avalanche — gas barato, mercado menos competitivo que Ethereum.',
+    arb:          'Aave V3 no Arbitrum — L2 com alto volume. Mais oportunidades mas mais competição.',
+    op:           'Aave V3 no Optimism — L2 similar ao Base. Gas barato, bom volume de posições.',
+    scroll:       'Aave V3 no Scroll — L2 nova com poucos bots competidores. Menor volume mas maior facilidade de captura.',
+    linea:        'Aave V3 no Linea — L2 nova da Consensys. Actividade crescente, competição baixa.',
+    compound_base:'Compound V3 (Comet) na Base — protocolo alternativo ao Aave. Bonus de liquidação 8–10%, maior que o Aave.',
+    morpho_base:  'Morpho Blue na Base — mercados isolados com LIF até 15%. 5000+ posições, o maior volume de todos os protocolos.',
+  };
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '1px solid #333', paddingBottom: '0.75rem', overflowX: 'auto', whiteSpace: 'nowrap', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-        {CHAINS.map(({ id, label, activeColor }) => (
-          <button key={id} onClick={() => setSubTab(id)} style={subBtnStyle(id, activeColor)}>
-            {label}
-          </button>
-        ))}
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 50,
+        background: '#0d0d0d',
+        borderBottom: '1px solid #333',
+        paddingBottom: '0.75rem',
+        paddingTop: '0.5rem',
+        marginBottom: '1rem',
+      }}>
+        <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', whiteSpace: 'nowrap', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+          {CHAINS.map(({ id, label, activeColor }) => (
+            <button key={id} onClick={() => setSubTab(id)} style={subBtnStyle(id, activeColor)}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
+      {DESCRIPTIONS[subTab] && (
+        <div style={{
+          fontSize: '0.82em', color: '#888', marginBottom: '1.1rem',
+          padding: '0.5rem 0.75rem', background: '#151515',
+          borderRadius: 4, borderLeft: `3px solid ${CHAINS.find(c => c.id === subTab)?.activeColor ?? '#444'}`,
+        }}>
+          {DESCRIPTIONS[subTab]}
+        </div>
+      )}
       {!active
         ? <div style={{ color: '#888', padding: '2rem 0', textAlign: 'center' }}>
             Sem dados {chainLabel} ainda
