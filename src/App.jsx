@@ -817,17 +817,18 @@ function LiquidationsPanel({ data }) {
   );
 }
 
-function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea }) {
+function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea, dataCompoundBase }) {
   const [subTab, setSubTab] = useState('base');
 
   const CHAINS = [
-    { id: 'base',    label: 'Base',      activeColor: '#2d6ae0' },
-    { id: 'polygon', label: 'Polygon',   activeColor: '#8247e5' },
-    { id: 'avax',    label: 'Avalanche', activeColor: '#e84142' },
-    { id: 'arb',     label: 'Arbitrum',  activeColor: '#28A0F0' },
-    { id: 'op',      label: 'Optimism',  activeColor: '#FF0420' },
-    { id: 'scroll',  label: 'Scroll',    activeColor: '#FFDBB0' },
-    { id: 'linea',   label: 'Linea',     activeColor: '#61DFFF' },
+    { id: 'base',         label: 'Base',      activeColor: '#2d6ae0' },
+    { id: 'polygon',      label: 'Polygon',   activeColor: '#8247e5' },
+    { id: 'avax',         label: 'Avalanche', activeColor: '#e84142' },
+    { id: 'arb',          label: 'Arbitrum',  activeColor: '#28A0F0' },
+    { id: 'op',           label: 'Optimism',  activeColor: '#FF0420' },
+    { id: 'scroll',       label: 'Scroll',    activeColor: '#FFDBB0' },
+    { id: 'linea',        label: 'Linea',     activeColor: '#61DFFF' },
+    { id: 'compound_base', label: 'Compound', activeColor: '#00D395' },
   ];
 
   const subBtnStyle = (id, activeColor) => ({
@@ -842,7 +843,7 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
     transition: 'background 0.15s',
   });
 
-  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb, op: dataOp, scroll: dataScroll, linea: dataLinea };
+  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb, op: dataOp, scroll: dataScroll, linea: dataLinea, compound_base: dataCompoundBase };
   const active = dataMap[subTab];
   const chainLabel = CHAINS.find(c => c.id === subTab)?.label ?? subTab;
 
@@ -1115,13 +1116,14 @@ export default function App() {
   const [liquidationsAvax,    setLiquidationsAvax]    = useState(null);
   const [liquidationsArb,     setLiquidationsArb]     = useState(null);
   const [liquidationsOp,      setLiquidationsOp]      = useState(null);
-  const [liquidationsScroll,  setLiquidationsScroll]  = useState(null);
-  const [liquidationsLinea,   setLiquidationsLinea]   = useState(null);
+  const [liquidationsScroll,       setLiquidationsScroll]       = useState(null);
+  const [liquidationsLinea,        setLiquidationsLinea]        = useState(null);
+  const [liquidationsCompoundBase, setLiquidationsCompoundBase] = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
@@ -1136,6 +1138,7 @@ export default function App() {
       apiFetch('/api/liquidations/op'),
       apiFetch('/api/liquidations/scroll'),
       apiFetch('/api/liquidations/linea'),
+      apiFetch('/api/liquidations/compound_base'),
     ]);
     if (pnlR.status                === 'fulfilled') setPnl(pnlR.value);                           else errs.pnl          = pnlR.reason?.message;
     if (ibkrR.status               === 'fulfilled') setIbkr(ibkrR.value);                         else errs.ibkr         = ibkrR.reason?.message;
@@ -1149,8 +1152,9 @@ export default function App() {
     if (liquidationsAvaxR.status    === 'fulfilled') setLiquidationsAvax(liquidationsAvaxR.value);
     if (liquidationsArbR.status     === 'fulfilled') setLiquidationsArb(liquidationsArbR.value);
     if (liquidationsOpR.status      === 'fulfilled') setLiquidationsOp(liquidationsOpR.value);
-    if (liquidationsScrollR.status  === 'fulfilled') setLiquidationsScroll(liquidationsScrollR.value);
-    if (liquidationsLineaR.status   === 'fulfilled') setLiquidationsLinea(liquidationsLineaR.value);
+    if (liquidationsScrollR.status       === 'fulfilled') setLiquidationsScroll(liquidationsScrollR.value);
+    if (liquidationsLineaR.status        === 'fulfilled') setLiquidationsLinea(liquidationsLineaR.value);
+    if (liquidationsCompoundBaseR.status === 'fulfilled') setLiquidationsCompoundBase(liquidationsCompoundBaseR.value);
     setErrors(errs);
     setOnline(Object.keys(errs).length < 7);
     setLoading(false);
@@ -1237,7 +1241,7 @@ export default function App() {
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
         {activeTab === 'funding'  && (errors.funding ? <Err msg={errors.funding} /> : <FundingTab data={funding} />)}
         {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
-        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} />)}
+        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} />)}
         {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
