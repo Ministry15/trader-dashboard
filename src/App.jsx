@@ -821,7 +821,9 @@ function LiquidationsPanel({ data, defaultMinProfit = 25 }) {
   if (!data) return <Loader />;
   const opps    = data.opportunities ?? [];
   const summary = data.summary       ?? {};
-  const totalEstProfit = Number(summary.total_est_profit) || 0;
+  const getProfit = o => Number(o.estimated_profit_usd ?? o.estimated_profit) || 0;
+  const totalEstProfit = opps.reduce((s, o) => s + getProfit(o), 0);
+  const bestProfit     = opps.reduce((m, o) => Math.max(m, getProfit(o)), 0);
 
   const [minProfit,  setMinProfit]  = useState(String(defaultMinProfit));
   const [dateFilter, setDateFilter] = useState('hoje');
@@ -845,7 +847,7 @@ function LiquidationsPanel({ data, defaultMinProfit = 25 }) {
   const filteredOpps = opps.filter(inRange);
   const liquidable = filteredOpps.filter(o => o.health_factor < 1.0);
   const watching   = filteredOpps.filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2)
-                        .filter(o => (Number(o.estimated_profit) || 0) >= (Number(minProfit) || 0))
+                        .filter(o => getProfit(o) >= (Number(minProfit) || 0))
                         .sort((a, b) => a.health_factor - b.health_factor);
 
   const thead = (
@@ -869,7 +871,7 @@ function LiquidationsPanel({ data, defaultMinProfit = 25 }) {
       </td>
       <td>{fmtUSD(o.debt_usd)}</td>
       <td className={isLiquidable ? 'pos' : ''} style={isLiquidable ? {} : { color: '#4a7a4a' }}>
-        {fmtUSD(o.estimated_profit)}
+        {fmtUSD(getProfit(o))}
       </td>
     </tr>
   );
@@ -879,7 +881,7 @@ function LiquidationsPanel({ data, defaultMinProfit = 25 }) {
       <div className="kpi-row">
         <div className="kpi-card">
           <div className="kpi-label">Oportunidades</div>
-          <div className="kpi-value">{summary.total ?? 0}</div>
+          <div className="kpi-value">{opps.length}</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Executadas</div>
@@ -893,8 +895,8 @@ function LiquidationsPanel({ data, defaultMinProfit = 25 }) {
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Melhor Oportunidade</div>
-          <div className={`kpi-value ${clr(summary.best_profit)}`}>
-            {fmtUSD(summary.best_profit)}
+          <div className={`kpi-value ${clr(bestProfit)}`}>
+            {fmtUSD(bestProfit)}
           </div>
         </div>
       </div>
@@ -970,14 +972,14 @@ function ResumoPanel({ allData }) {
     if (!d) return { id, label, protocol, opp: 0, avgProfit: null, maxProfit: null, hasData: false };
     const s = d.summary ?? {};
     const opps = d.opportunities ?? [];
-    const profits = opps.map(o => Number(o.estimated_profit) || 0).filter(v => v > 0);
+    const profits = opps.map(o => Number(o.estimated_profit_usd ?? o.estimated_profit) || 0).filter(v => v > 0);
     const avgProfit = profits.length ? profits.reduce((a, b) => a + b, 0) / profits.length : 0;
-    const maxProfit = Number(s.best_profit) || (profits.length ? Math.max(...profits) : 0);
-    return { id, label, protocol, opp: s.total ?? opps.length, avgProfit, maxProfit, hasData: true };
+    const maxProfit = profits.length ? Math.max(...profits) : 0;
+    return { id, label, protocol, opp: opps.length, avgProfit, maxProfit, hasData: true };
   });
 
   const totalOpp    = rows.reduce((s, r) => s + (r.opp || 0), 0);
-  const totalProfit = CHAIN_META.reduce((s, { id }) => s + (Number(allData[id]?.summary?.total_est_profit) || 0), 0);
+  const totalProfit = CHAIN_META.reduce((s, { id }) => s + (allData[id]?.opportunities ?? []).reduce((a, o) => a + (Number(o.estimated_profit_usd ?? o.estimated_profit) || 0), 0), 0);
   const bestOpp     = rows.reduce((best, r) => (r.maxProfit ?? 0) > best ? (r.maxProfit ?? 0) : best, 0);
 
   return (
