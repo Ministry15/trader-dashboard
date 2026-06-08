@@ -846,7 +846,7 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '1px solid #333', paddingBottom: '0.75rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '1px solid #333', paddingBottom: '0.75rem', overflowX: 'auto', whiteSpace: 'nowrap', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
         {CHAINS.map(({ id, label, activeColor }) => (
           <button key={id} onClick={() => setSubTab(id)} style={subBtnStyle(id, activeColor)}>
             {label}
