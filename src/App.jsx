@@ -817,19 +817,20 @@ function LiquidationsPanel({ data }) {
   );
 }
 
-function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea, dataCompoundBase, dataMorphoBase }) {
+function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea, dataCompoundBase, dataMorphoBase, dataCompoundPolygon }) {
   const [subTab, setSubTab] = useState('base');
 
   const CHAINS = [
-    { id: 'base',         label: 'Base',      activeColor: '#2d6ae0' },
-    { id: 'polygon',      label: 'Polygon',   activeColor: '#8247e5' },
-    { id: 'avax',         label: 'Avalanche', activeColor: '#e84142' },
-    { id: 'arb',          label: 'Arbitrum',  activeColor: '#28A0F0' },
-    { id: 'op',           label: 'Optimism',  activeColor: '#FF0420' },
-    { id: 'scroll',       label: 'Scroll',    activeColor: '#FFDBB0' },
-    { id: 'linea',        label: 'Linea',     activeColor: '#61DFFF' },
-    { id: 'compound_base', label: 'Compound', activeColor: '#00D395' },
-    { id: 'morpho_base',  label: 'Morpho',   activeColor: '#2470FF' },
+    { id: 'base',             label: 'Base',        activeColor: '#2d6ae0' },
+    { id: 'polygon',          label: 'Polygon',     activeColor: '#8247e5' },
+    { id: 'avax',             label: 'Avalanche',   activeColor: '#e84142' },
+    { id: 'arb',              label: 'Arbitrum',    activeColor: '#28A0F0' },
+    { id: 'op',               label: 'Optimism',    activeColor: '#FF0420' },
+    { id: 'scroll',           label: 'Scroll',      activeColor: '#FFDBB0' },
+    { id: 'linea',            label: 'Linea',       activeColor: '#61DFFF' },
+    { id: 'compound_base',    label: 'Compound',    activeColor: '#00D395' },
+    { id: 'morpho_base',      label: 'Morpho',      activeColor: '#2470FF' },
+    { id: 'compound_polygon', label: 'Cmpd Poly',   activeColor: '#00A86B' },
   ];
 
   const subBtnStyle = (id, activeColor) => ({
@@ -844,20 +845,21 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
     transition: 'background 0.15s',
   });
 
-  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb, op: dataOp, scroll: dataScroll, linea: dataLinea, compound_base: dataCompoundBase, morpho_base: dataMorphoBase };
+  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb, op: dataOp, scroll: dataScroll, linea: dataLinea, compound_base: dataCompoundBase, morpho_base: dataMorphoBase, compound_polygon: dataCompoundPolygon };
   const active = dataMap[subTab];
   const chainLabel = CHAINS.find(c => c.id === subTab)?.label ?? subTab;
 
   const DESCRIPTIONS = {
-    base:         'Aave V3 — protocolo de lending líder. Liquidas posições subcapitalizadas e recebes 5–7% de bonus.',
-    polygon:      'Aave V3 na Polygon — gas ultra barato (~$0.01). Mesmo mecanismo do Base com menos competição.',
-    avax:         'Aave V3 na Avalanche — gas barato, mercado menos competitivo que Ethereum.',
-    arb:          'Aave V3 no Arbitrum — L2 com alto volume. Mais oportunidades mas mais competição.',
-    op:           'Aave V3 no Optimism — L2 similar ao Base. Gas barato, bom volume de posições.',
-    scroll:       'Aave V3 no Scroll — L2 nova com poucos bots competidores. Menor volume mas maior facilidade de captura.',
-    linea:        'Aave V3 no Linea — L2 nova da Consensys. Actividade crescente, competição baixa.',
-    compound_base:'Compound V3 (Comet) na Base — protocolo alternativo ao Aave. Bonus de liquidação 8–10%, maior que o Aave.',
-    morpho_base:  'Morpho Blue na Base — mercados isolados com LIF até 15%. 5000+ posições, o maior volume de todos os protocolos.',
+    base:             'Aave V3 — protocolo de lending líder. Liquidas posições subcapitalizadas e recebes 5–7% de bonus.',
+    polygon:          'Aave V3 na Polygon — gas ultra barato (~$0.01). Mesmo mecanismo do Base com menos competição.',
+    avax:             'Aave V3 na Avalanche — gas barato, mercado menos competitivo que Ethereum.',
+    arb:              'Aave V3 no Arbitrum — L2 com alto volume. Mais oportunidades mas mais competição.',
+    op:               'Aave V3 no Optimism — L2 similar ao Base. Gas barato, bom volume de posições.',
+    scroll:           'Aave V3 no Scroll — L2 nova com poucos bots competidores. Menor volume mas maior facilidade de captura.',
+    linea:            'Aave V3 no Linea — L2 nova da Consensys. Actividade crescente, competição baixa.',
+    compound_base:    'Compound V3 (Comet) na Base — protocolo alternativo ao Aave. Bonus de liquidação 8–10%, maior que o Aave.',
+    morpho_base:      'Morpho Blue na Base — mercados isolados com LIF até 15%. 5000+ posições, o maior volume de todos os protocolos.',
+    compound_polygon: 'Compound V3 (Comet) na Polygon — dois mercados: USDC + USDT. Bonus 8%, gas em MATIC (~$0.01), menos competição que Base.',
   };
 
   return (
@@ -1150,13 +1152,14 @@ export default function App() {
   const [liquidationsOp,      setLiquidationsOp]      = useState(null);
   const [liquidationsScroll,       setLiquidationsScroll]       = useState(null);
   const [liquidationsLinea,        setLiquidationsLinea]        = useState(null);
-  const [liquidationsCompoundBase, setLiquidationsCompoundBase] = useState(null);
-  const [liquidationsMorphoBase,   setLiquidationsMorphoBase]   = useState(null);
+  const [liquidationsCompoundBase,    setLiquidationsCompoundBase]    = useState(null);
+  const [liquidationsMorphoBase,      setLiquidationsMorphoBase]      = useState(null);
+  const [liquidationsCompoundPolygon, setLiquidationsCompoundPolygon] = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR, liquidationsMorphoBaseR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR, liquidationsMorphoBaseR, liquidationsCompoundPolygonR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
@@ -1173,6 +1176,7 @@ export default function App() {
       apiFetch('/api/liquidations/linea'),
       apiFetch('/api/liquidations/compound_base'),
       apiFetch('/api/liquidations/morpho_base'),
+      apiFetch('/api/liquidations/compound_polygon'),
     ]);
     if (pnlR.status                === 'fulfilled') setPnl(pnlR.value);                           else errs.pnl          = pnlR.reason?.message;
     if (ibkrR.status               === 'fulfilled') setIbkr(ibkrR.value);                         else errs.ibkr         = ibkrR.reason?.message;
@@ -1188,8 +1192,9 @@ export default function App() {
     if (liquidationsOpR.status      === 'fulfilled') setLiquidationsOp(liquidationsOpR.value);
     if (liquidationsScrollR.status       === 'fulfilled') setLiquidationsScroll(liquidationsScrollR.value);
     if (liquidationsLineaR.status        === 'fulfilled') setLiquidationsLinea(liquidationsLineaR.value);
-    if (liquidationsCompoundBaseR.status === 'fulfilled') setLiquidationsCompoundBase(liquidationsCompoundBaseR.value);
-    if (liquidationsMorphoBaseR.status   === 'fulfilled') setLiquidationsMorphoBase(liquidationsMorphoBaseR.value);
+    if (liquidationsCompoundBaseR.status    === 'fulfilled') setLiquidationsCompoundBase(liquidationsCompoundBaseR.value);
+    if (liquidationsMorphoBaseR.status      === 'fulfilled') setLiquidationsMorphoBase(liquidationsMorphoBaseR.value);
+    if (liquidationsCompoundPolygonR.status === 'fulfilled') setLiquidationsCompoundPolygon(liquidationsCompoundPolygonR.value);
     setErrors(errs);
     setOnline(Object.keys(errs).length < 7);
     setLoading(false);
@@ -1276,7 +1281,7 @@ export default function App() {
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
         {activeTab === 'funding'  && (errors.funding ? <Err msg={errors.funding} /> : <FundingTab data={funding} />)}
         {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
-        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} dataMorphoBase={liquidationsMorphoBase} />)}
+        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} dataMorphoBase={liquidationsMorphoBase} dataCompoundPolygon={liquidationsCompoundPolygon} />)}
         {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
