@@ -863,11 +863,15 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
   return (
     <div>
       <div style={{
-        position: 'sticky', top: 0, zIndex: 50,
-        background: '#0d0d0d',
+        position: 'sticky', top: 0, zIndex: 100,
+        background: '#0a0a0a',
         borderBottom: '1px solid #333',
-        paddingBottom: '0.75rem',
         paddingTop: '0.5rem',
+        paddingBottom: '0.75rem',
+        paddingLeft: '20px',
+        paddingRight: '20px',
+        marginLeft: '-20px',
+        marginRight: '-20px',
         marginBottom: '1rem',
       }}>
         <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', whiteSpace: 'nowrap', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
