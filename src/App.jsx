@@ -817,12 +817,13 @@ function LiquidationsPanel({ data }) {
   );
 }
 
-function LiquidationsTab({ dataBase, dataPolygon }) {
+function LiquidationsTab({ dataBase, dataPolygon, dataAvax }) {
   const [subTab, setSubTab] = useState('base');
 
   const CHAINS = [
-    { id: 'base',    label: 'Base',    activeColor: '#2d6ae0' },
-    { id: 'polygon', label: 'Polygon', activeColor: '#8247e5' },
+    { id: 'base',    label: 'Base',      activeColor: '#2d6ae0' },
+    { id: 'polygon', label: 'Polygon',   activeColor: '#8247e5' },
+    { id: 'avax',    label: 'Avalanche', activeColor: '#e84142' },
   ];
 
   const subBtnStyle = (id, activeColor) => ({
@@ -837,7 +838,9 @@ function LiquidationsTab({ dataBase, dataPolygon }) {
     transition: 'background 0.15s',
   });
 
-  const active = subTab === 'base' ? dataBase : dataPolygon;
+  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax };
+  const active = dataMap[subTab];
+  const chainLabel = CHAINS.find(c => c.id === subTab)?.label ?? subTab;
 
   return (
     <div>
@@ -850,7 +853,7 @@ function LiquidationsTab({ dataBase, dataPolygon }) {
       </div>
       {!active
         ? <div style={{ color: '#888', padding: '2rem 0', textAlign: 'center' }}>
-            Sem dados {subTab === 'polygon' ? 'Polygon' : 'Base'} ainda
+            Sem dados {chainLabel} ainda
           </div>
         : <LiquidationsPanel key={subTab} data={active} />
       }
@@ -1105,11 +1108,12 @@ export default function App() {
   const [flashArb,            setFlashArb]            = useState(null);
   const [liquidations,        setLiquidations]        = useState(null);
   const [liquidationsPolygon, setLiquidationsPolygon] = useState(null);
+  const [liquidationsAvax,    setLiquidationsAvax]    = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
@@ -1119,6 +1123,7 @@ export default function App() {
       apiFetch('/api/flash-arb'),
       apiFetch('/api/liquidations'),
       apiFetch('/api/liquidations/polygon'),
+      apiFetch('/api/liquidations/avax'),
     ]);
     if (pnlR.status                === 'fulfilled') setPnl(pnlR.value);                           else errs.pnl          = pnlR.reason?.message;
     if (ibkrR.status               === 'fulfilled') setIbkr(ibkrR.value);                         else errs.ibkr         = ibkrR.reason?.message;
@@ -1129,6 +1134,7 @@ export default function App() {
     if (flashArbR.status           === 'fulfilled') setFlashArb(flashArbR.value);                 else errs.flashArb     = flashArbR.reason?.message;
     if (liquidationsR.status       === 'fulfilled') setLiquidations(liquidationsR.value);         else errs.liquidations = liquidationsR.reason?.message;
     if (liquidationsPolygonR.status === 'fulfilled') setLiquidationsPolygon(liquidationsPolygonR.value);
+    if (liquidationsAvaxR.status    === 'fulfilled') setLiquidationsAvax(liquidationsAvaxR.value);
     setErrors(errs);
     setOnline(Object.keys(errs).length < 7);
     setLoading(false);
@@ -1215,7 +1221,7 @@ export default function App() {
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
         {activeTab === 'funding'  && (errors.funding ? <Err msg={errors.funding} /> : <FundingTab data={funding} />)}
         {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
-        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} />)}
+        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} />)}
         {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
