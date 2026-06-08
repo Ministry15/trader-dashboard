@@ -817,7 +817,7 @@ function LiquidationsPanel({ data }) {
   );
 }
 
-function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea, dataCompoundBase }) {
+function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea, dataCompoundBase, dataMorphoBase }) {
   const [subTab, setSubTab] = useState('base');
 
   const CHAINS = [
@@ -829,6 +829,7 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
     { id: 'scroll',       label: 'Scroll',    activeColor: '#FFDBB0' },
     { id: 'linea',        label: 'Linea',     activeColor: '#61DFFF' },
     { id: 'compound_base', label: 'Compound', activeColor: '#00D395' },
+    { id: 'morpho_base',  label: 'Morpho',   activeColor: '#2470FF' },
   ];
 
   const subBtnStyle = (id, activeColor) => ({
@@ -843,7 +844,7 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
     transition: 'background 0.15s',
   });
 
-  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb, op: dataOp, scroll: dataScroll, linea: dataLinea, compound_base: dataCompoundBase };
+  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb, op: dataOp, scroll: dataScroll, linea: dataLinea, compound_base: dataCompoundBase, morpho_base: dataMorphoBase };
   const active = dataMap[subTab];
   const chainLabel = CHAINS.find(c => c.id === subTab)?.label ?? subTab;
 
@@ -1119,11 +1120,12 @@ export default function App() {
   const [liquidationsScroll,       setLiquidationsScroll]       = useState(null);
   const [liquidationsLinea,        setLiquidationsLinea]        = useState(null);
   const [liquidationsCompoundBase, setLiquidationsCompoundBase] = useState(null);
+  const [liquidationsMorphoBase,   setLiquidationsMorphoBase]   = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR, liquidationsMorphoBaseR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
@@ -1139,6 +1141,7 @@ export default function App() {
       apiFetch('/api/liquidations/scroll'),
       apiFetch('/api/liquidations/linea'),
       apiFetch('/api/liquidations/compound_base'),
+      apiFetch('/api/liquidations/morpho_base'),
     ]);
     if (pnlR.status                === 'fulfilled') setPnl(pnlR.value);                           else errs.pnl          = pnlR.reason?.message;
     if (ibkrR.status               === 'fulfilled') setIbkr(ibkrR.value);                         else errs.ibkr         = ibkrR.reason?.message;
@@ -1155,6 +1158,7 @@ export default function App() {
     if (liquidationsScrollR.status       === 'fulfilled') setLiquidationsScroll(liquidationsScrollR.value);
     if (liquidationsLineaR.status        === 'fulfilled') setLiquidationsLinea(liquidationsLineaR.value);
     if (liquidationsCompoundBaseR.status === 'fulfilled') setLiquidationsCompoundBase(liquidationsCompoundBaseR.value);
+    if (liquidationsMorphoBaseR.status   === 'fulfilled') setLiquidationsMorphoBase(liquidationsMorphoBaseR.value);
     setErrors(errs);
     setOnline(Object.keys(errs).length < 7);
     setLoading(false);
@@ -1241,7 +1245,7 @@ export default function App() {
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
         {activeTab === 'funding'  && (errors.funding ? <Err msg={errors.funding} /> : <FundingTab data={funding} />)}
         {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
-        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} />)}
+        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} dataMorphoBase={liquidationsMorphoBase} />)}
         {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
