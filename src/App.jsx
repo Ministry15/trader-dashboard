@@ -56,55 +56,198 @@ function LiveClock() {
 }
 
 // ─── OVERVIEW ─────────────────────────────────────────────────────────────────
-function OverviewTab({ pnl, ibkr, sniper, grid, flashArb }) {
+function OverviewTab({ pnl, ibkr, sniper, grid, flashArb, system, liquidationsAll, errors }) {
   if (!pnl) return <Loader />;
 
+  // ─ P&L ─
   const todayBNB    = pnl.today?.sniper_bnb   ?? 0;
   const todayUSDT   = pnl.today?.grid_usdt    ?? 0;
   const totalTrades = (pnl.today?.sniper_trades ?? 0) + (pnl.today?.grid_trades ?? 0);
   const winRate     = pnl.today?.sniper_win_rate ?? sniper?.win_rate ?? 0;
-
-  const history   = pnl.history_7d ?? [];
-  const chartData = history.map(d => ({
+  const history     = pnl.history_7d ?? [];
+  const chartData   = history.map(d => ({
     day:    (d.date ?? '').slice(5),
     sniper: Number(d.sniper_bnb ?? 0),
     grid:   Number(d.grid_usdt  ?? 0),
   }));
-
   const weekSniper = history.reduce((s, d) => s + (Number(d.sniper_bnb) || 0), 0);
   const weekGrid   = history.reduce((s, d) => s + (Number(d.grid_usdt)  || 0), 0);
-
   const regime = String(ibkr?.regime?.regime ?? ibkr?.regime ?? 'UNKNOWN');
   const regimeClass = regime.toLowerCase().includes('bull') ? 'bull'
     : regime.toLowerCase().includes('bear') ? 'bear'
     : regime.toLowerCase().includes('range') || regime.toLowerCase().includes('sideways') ? 'range'
     : 'unknown';
 
+  // ─ Liquidations aggregate ─
+  const LIQ_IDS = ['base','polygon','avax','arb','op','scroll','linea',
+    'compound_base','compound_polygon','compound_arb','compound_op',
+    'morpho_base','morpho_polygon','morpho_arb'];
+  const liqTotalProfit = LIQ_IDS.reduce((s, id) =>
+    s + (Number(liquidationsAll?.[id]?.summary?.total_est_profit) || 0), 0);
+  const liqBestOpp = LIQ_IDS.reduce((best, id) => {
+    const v = Number(liquidationsAll?.[id]?.summary?.best_profit) || 0;
+    return v > best ? v : best;
+  }, 0);
+  const liqWatching   = LIQ_IDS.reduce((cnt, id) =>
+    cnt + (liquidationsAll?.[id]?.opportunities ?? []).filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2).length, 0);
+  const liqLiquidable = LIQ_IDS.reduce((cnt, id) =>
+    cnt + (liquidationsAll?.[id]?.opportunities ?? []).filter(o => o.health_factor < 1.0).length, 0);
+
+  // ─ Bot status ─
+  const serviceList = system
+    ? (Array.isArray(system.services)
+        ? system.services
+        : Object.entries(system.services ?? {}).map(([k, v]) => ({
+            service: k,
+            status: typeof v === 'string' ? v : (v ? 'active' : 'down'),
+            active: v === 'active' || v === true,
+          })))
+    : [];
+  const botsActive = serviceList.filter(s =>
+    s.active ?? (s.status === 'active' || s.status === 'running')).length;
+
+  // ─ Alerts ─
+  const ALERT_LABELS = {
+    pnl:          'P&L sem dados',
+    ibkr:         'IBKR sem resposta',
+    sniper:       'Sniper bot sem resposta',
+    grid:         'Grid bot sem resposta',
+    funding:      'Funding sem dados',
+    flashArb:     'Flash Arb sem dados',
+    liquidations: 'Liquidações (Base) sem dados',
+    system:       'System monitor sem resposta',
+  };
+  const alerts = Object.entries(errors ?? {})
+    .filter(([, msg]) => msg)
+    .map(([key, msg]) => ({ label: ALERT_LABELS[key] ?? key, msg }));
+
   return (
     <div>
+      {/* ── Alerts ─────────────────────────────────────────────────────────── */}
+      {alerts.length > 0 && (
+        <div style={{ marginBottom: '1rem' }}>
+          {alerts.map((a, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: '0.6rem',
+              background: '#1a0a00', border: '1px solid #5a2a00',
+              borderLeft: '3px solid var(--yellow)',
+              borderRadius: 4, padding: '0.45rem 0.75rem',
+              marginBottom: '0.4rem', fontSize: '0.85em',
+            }}>
+              <AlertTriangle size={13} style={{ color: 'var(--yellow)', flexShrink: 0 }} />
+              <span style={{ color: 'var(--yellow)', fontWeight: 700 }}>{a.label}</span>
+              <span style={{ color: '#888' }}>{a.msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Top KPIs ────────────────────────────────────────────────────────── */}
       <div className="kpi-grid mb">
         <div className="kpi">
-          <div className="kpi-label">// SNIPER P&amp;L TODAY</div>
-          <div className={`kpi-val ${todayBNB < 0 ? 'neg' : ''}`}>{fmtBNB(todayBNB)}</div>
-          <div className="kpi-sub">BSC NET</div>
+          <div className="kpi-label">// BOTS ACTIVOS</div>
+          <div className="kpi-val neu">
+            {system ? `${botsActive}/${serviceList.length}` : '—'}
+          </div>
+          <div className="kpi-sub">SYSTEM SERVICES</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label">// GRID P&amp;L TODAY</div>
-          <div className={`kpi-val ${todayUSDT < 0 ? 'neg' : ''}`}>{fmtUSD(todayUSDT)}</div>
-          <div className="kpi-sub">USDT NET</div>
+          <div className="kpi-label">// LIQ. ESTIMADO HOJE</div>
+          <div className={`kpi-val ${clr(liqTotalProfit)}`}>{fmtUSD(liqTotalProfit)}</div>
+          <div className="kpi-sub">TODAS AS CHAINS</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label">// WIN RATE</div>
-          <div className="kpi-val">{pct(winRate)}</div>
-          <div className="kpi-sub">SNIPER TODAY</div>
+          <div className="kpi-label">// MELHOR OPP. HOJE</div>
+          <div className={`kpi-val ${clr(liqBestOpp)}`}>{fmtUSD(liqBestOpp)}</div>
+          <div className="kpi-sub">LIQUIDAÇÕES</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label">// TOTAL TRADES</div>
-          <div className="kpi-val neu">{totalTrades}</div>
-          <div className="kpi-sub">SNIPER + GRID</div>
+          <div className="kpi-label">// EM VIGILÂNCIA</div>
+          <div className="kpi-val neu">{liqWatching}</div>
+          <div className="kpi-sub">
+            {liqLiquidable > 0 ? `+${liqLiquidable} LIQUIDÁVEIS` : 'HF 1.0–1.2'}
+          </div>
         </div>
       </div>
 
+      {/* ── Bot Status + P&L breakdown ──────────────────────────────────────── */}
+      <div className="row2 mb">
+        <div className="panel">
+          <div className="panel-head"><CheckCircle size={11} />&nbsp;STATUS DOS BOTS</div>
+          {serviceList.length === 0 ? (
+            <div className="empty">SEM DADOS DE SISTEMA</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {serviceList.map(svc => {
+                const name   = svc.service ?? svc.name ?? '?';
+                const isUp   = svc.active ?? (svc.status === 'active' || svc.status === 'running');
+                const status = svc.status ?? (isUp ? 'active' : 'down');
+                return (
+                  <div key={name} className="svc-row">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {isUp
+                        ? <CheckCircle size={12} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                        : <XCircle    size={12} style={{ color: status === 'failed' ? 'var(--red)' : 'var(--yellow)', flexShrink: 0 }} />}
+                      <span className="svc-name">{name}</span>
+                    </div>
+                    <span className={`badge ${isUp ? 'bg' : status === 'failed' ? 'br' : 'by'}`}>{status}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-head">P&amp;L BREAKDOWN — HOJE</div>
+          <div className="kv-list">
+            <div className="kv">
+              <span className="kv-k">SNIPER</span>
+              <span className={clr(todayBNB)}>{fmtBNB(todayBNB)}</span>
+            </div>
+            <div className="kv">
+              <span className="kv-k">GRID</span>
+              <span className={clr(todayUSDT)}>{fmtUSD(todayUSDT)}</span>
+            </div>
+            {flashArb != null && (
+              <div className="kv">
+                <span className="kv-k">FLASH ARB</span>
+                <span className={clr(flashArb.total_pnl_usd ?? 0)}>{fmtUSD(flashArb.total_pnl_usd ?? 0)}</span>
+              </div>
+            )}
+            <div className="kv">
+              <span className="kv-k">LIQUIDAÇÕES</span>
+              <span className={clr(liqTotalProfit)}>{fmtUSD(liqTotalProfit)}</span>
+            </div>
+            <div className="kv" style={{ borderTop: '1px solid #222', paddingTop: 8, marginTop: 2 }}>
+              <span className="kv-k">WIN RATE</span>
+              <span>{pct(winRate)}</span>
+            </div>
+            <div className="kv">
+              <span className="kv-k">TRADES</span>
+              <span className="neu">{totalTrades}</span>
+            </div>
+            <div className="kv">
+              <span className="kv-k">REGIME</span>
+              <span className={`regime-tag regime-${regimeClass}`}>{regime}</span>
+            </div>
+            {ibkr?.regime?.vix != null && (
+              <div className="kv">
+                <span className="kv-k">VIX</span>
+                <span style={{ color: ibkr.regime.vix > 25 ? 'var(--yellow)' : 'var(--green)' }}>{fmt(ibkr.regime.vix)}</span>
+              </div>
+            )}
+            {ibkr?.regime?.spy != null && (
+              <div className="kv">
+                <span className="kv-k">SPY</span>
+                <span>${fmt(ibkr.regime.spy)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── 7-day chart + Weekly summary ────────────────────────────────────── */}
       <div className="row2 mb">
         <div className="panel">
           <div className="panel-head">7-DAY P&amp;L HISTORY</div>
@@ -129,10 +272,6 @@ function OverviewTab({ pnl, ibkr, sniper, grid, flashArb }) {
           <div className="panel-head">WEEKLY SUMMARY</div>
           <div className="kv-list">
             <div className="kv">
-              <span className="kv-k">REGIME</span>
-              <span className={`regime-tag regime-${regimeClass}`}>{regime}</span>
-            </div>
-            <div className="kv">
               <span className="kv-k">SNIPER 7D</span>
               <span className={clr(weekSniper)}>{fmtBNB(weekSniper)}</span>
             </div>
@@ -140,18 +279,6 @@ function OverviewTab({ pnl, ibkr, sniper, grid, flashArb }) {
               <span className="kv-k">GRID 7D</span>
               <span className={clr(weekGrid)}>{fmtUSD(weekGrid)}</span>
             </div>
-            {ibkr?.regime?.vix != null && (
-              <div className="kv">
-                <span className="kv-k">VIX</span>
-                <span style={{ color: ibkr.regime.vix > 25 ? 'var(--yellow)' : 'var(--green)' }}>{fmt(ibkr.regime.vix)}</span>
-              </div>
-            )}
-            {ibkr?.regime?.spy != null && (
-              <div className="kv">
-                <span className="kv-k">SPY</span>
-                <span>${fmt(ibkr.regime.spy)}</span>
-              </div>
-            )}
             {ibkr?.signals?.signals_today != null && (
               <div className="kv">
                 <span className="kv-k">IBKR SIGNALS</span>
@@ -164,20 +291,22 @@ function OverviewTab({ pnl, ibkr, sniper, grid, flashArb }) {
                 <span className="pos">{grid.active_bots}</span>
               </div>
             )}
-            {flashArb != null && (
-              <div className="kv">
-                <span className="kv-k">FLASH ARB P&amp;L</span>
-                <span className={clr(flashArb.total_pnl_usd ?? 0)}>
-                  {fmtUSD(flashArb.total_pnl_usd ?? 0)}
-                </span>
-              </div>
-            )}
             {flashArb?.service_status != null && (
               <div className="kv">
                 <span className="kv-k">FLASH ARB BOT</span>
                 <span className={`badge ${flashArb.service_status.active ? 'bg' : 'br'}`} style={{ fontSize: 9 }}>
                   {flashArb.service_status.status ?? 'unknown'}
                 </span>
+              </div>
+            )}
+            <div className="kv">
+              <span className="kv-k">LIQ. WATCHING</span>
+              <span style={{ color: liqWatching > 0 ? 'var(--yellow)' : 'var(--text-sec)' }}>{liqWatching}</span>
+            </div>
+            {liqLiquidable > 0 && (
+              <div className="kv">
+                <span className="kv-k">LIQ. NOW</span>
+                <span style={{ color: 'var(--red)' }}>{liqLiquidable}</span>
               </div>
             )}
           </div>
@@ -688,13 +817,13 @@ const LOG_SERVICES = [
 ];
 
 // ─── LIQUIDATIONS TAB ─────────────────────────────────────────────────────────
-function LiquidationsPanel({ data }) {
+function LiquidationsPanel({ data, defaultMinProfit = 25 }) {
   if (!data) return <Loader />;
   const opps    = data.opportunities ?? [];
   const summary = data.summary       ?? {};
   const totalEstProfit = Number(summary.total_est_profit) || 0;
 
-  const [minProfit,  setMinProfit]  = useState('25');
+  const [minProfit,  setMinProfit]  = useState(String(defaultMinProfit));
   const [dateFilter, setDateFilter] = useState('hoje');
 
   const _now   = new Date();
@@ -802,7 +931,7 @@ function LiquidationsPanel({ data }) {
               value={minProfit}
               onChange={e => setMinProfit(e.target.value)}
               onFocus={() => setMinProfit('')}
-              onBlur={e => { if (e.target.value.trim() === '') setMinProfit('25'); }}
+              onBlur={e => { if (e.target.value.trim() === '') setMinProfit(String(defaultMinProfit)); }}
               style={{ width: '5rem', padding: '0.2rem 0.4rem', borderRadius: 4, border: '1px solid #555', background: '#111', color: '#fff', fontSize: '0.9em' }}
             />
           </label>
@@ -817,41 +946,129 @@ function LiquidationsPanel({ data }) {
   );
 }
 
-function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea, dataCompoundBase, dataMorphoBase, dataCompoundPolygon, dataCompoundArb, dataCompoundOp, dataMorphoPolygon, dataMorphoArb }) {
-  const [subTab, setSubTab] = useState('base');
-
-  const CHAINS = [
-    { id: 'base',             label: 'Base',        activeColor: '#2d6ae0' },
-    { id: 'polygon',          label: 'Polygon',     activeColor: '#8247e5' },
-    { id: 'avax',             label: 'Avalanche',   activeColor: '#e84142' },
-    { id: 'arb',              label: 'Arbitrum',    activeColor: '#28A0F0' },
-    { id: 'op',               label: 'Optimism',    activeColor: '#FF0420' },
-    { id: 'scroll',           label: 'Scroll',      activeColor: '#FFDBB0' },
-    { id: 'linea',            label: 'Linea',       activeColor: '#61DFFF' },
-    { id: 'compound_base',    label: 'Compound',    activeColor: '#00D395' },
-    { id: 'morpho_base',      label: 'Morpho',      activeColor: '#2470FF' },
-    { id: 'compound_polygon', label: 'Cmpd Poly',   activeColor: '#00A86B' },
-    { id: 'compound_arb',     label: 'Cmpd Arb',    activeColor: '#00B4D8' },
-    { id: 'compound_op',      label: 'Cmpd OP',     activeColor: '#E8533F' },
-    { id: 'morpho_polygon',   label: 'Morpho Poly', activeColor: '#9B59B6' },
-    { id: 'morpho_arb',       label: 'Morpho Arb',  activeColor: '#1A9FFF' },
+// ─── RESUMO PANEL ─────────────────────────────────────────────────────────────
+function ResumoPanel({ allData }) {
+  const CHAIN_META = [
+    { id: 'base',             label: 'Base',      protocol: 'Aave V3'     },
+    { id: 'polygon',          label: 'Polygon',   protocol: 'Aave V3'     },
+    { id: 'avax',             label: 'Avalanche', protocol: 'Aave V3'     },
+    { id: 'arb',              label: 'Arbitrum',  protocol: 'Aave V3'     },
+    { id: 'op',               label: 'Optimism',  protocol: 'Aave V3'     },
+    { id: 'scroll',           label: 'Scroll',    protocol: 'Aave V3'     },
+    { id: 'linea',            label: 'Linea',     protocol: 'Aave V3'     },
+    { id: 'compound_base',    label: 'Base',      protocol: 'Compound V3' },
+    { id: 'compound_polygon', label: 'Polygon',   protocol: 'Compound V3' },
+    { id: 'compound_arb',     label: 'Arbitrum',  protocol: 'Compound V3' },
+    { id: 'compound_op',      label: 'Optimism',  protocol: 'Compound V3' },
+    { id: 'morpho_base',      label: 'Base',      protocol: 'Morpho Blue' },
+    { id: 'morpho_polygon',   label: 'Polygon',   protocol: 'Morpho Blue' },
+    { id: 'morpho_arb',       label: 'Arbitrum',  protocol: 'Morpho Blue' },
   ];
 
-  const subBtnStyle = (id, activeColor) => ({
-    padding: '0.4rem 1.3rem',
-    borderRadius: 4,
-    border: subTab === id ? `2px solid ${activeColor}` : '2px solid transparent',
-    cursor: 'pointer',
-    fontSize: '0.9em',
-    fontWeight: subTab === id ? 700 : 400,
-    background: subTab === id ? activeColor : '#2a2a2a',
-    color: '#fff',
-    transition: 'background 0.15s',
+  const rows = CHAIN_META.map(({ id, label, protocol }) => {
+    const d = allData[id];
+    if (!d) return { id, label, protocol, opp: 0, avgProfit: null, maxProfit: null, hasData: false };
+    const s = d.summary ?? {};
+    const opps = d.opportunities ?? [];
+    const profits = opps.map(o => Number(o.estimated_profit) || 0).filter(v => v > 0);
+    const avgProfit = profits.length ? profits.reduce((a, b) => a + b, 0) / profits.length : 0;
+    const maxProfit = Number(s.best_profit) || (profits.length ? Math.max(...profits) : 0);
+    return { id, label, protocol, opp: s.total ?? opps.length, avgProfit, maxProfit, hasData: true };
   });
 
-  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb, op: dataOp, scroll: dataScroll, linea: dataLinea, compound_base: dataCompoundBase, morpho_base: dataMorphoBase, compound_polygon: dataCompoundPolygon, compound_arb: dataCompoundArb, compound_op: dataCompoundOp, morpho_polygon: dataMorphoPolygon, morpho_arb: dataMorphoArb };
-  const active = dataMap[subTab];
-  const chainLabel = CHAINS.find(c => c.id === subTab)?.label ?? subTab;
+  const totalOpp    = rows.reduce((s, r) => s + (r.opp || 0), 0);
+  const totalProfit = CHAIN_META.reduce((s, { id }) => s + (Number(allData[id]?.summary?.total_est_profit) || 0), 0);
+  const bestOpp     = rows.reduce((best, r) => (r.maxProfit ?? 0) > best ? (r.maxProfit ?? 0) : best, 0);
+
+  return (
+    <div>
+      <div className="kpi-row">
+        <div className="kpi-card">
+          <div className="kpi-label">Total Oportunidades</div>
+          <div className="kpi-value">{totalOpp}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Lucro Total Estimado</div>
+          <div className={`kpi-value ${clr(totalProfit)}`}>{fmtUSD(totalProfit)}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Melhor Oportunidade</div>
+          <div className={`kpi-value ${clr(bestOpp)}`}>{fmtUSD(bestOpp)}</div>
+        </div>
+      </div>
+
+      <div style={{ overflowX: 'auto', marginTop: '1.25rem' }}>
+        <table>
+          <thead>
+            <tr>
+              <th>Chain</th>
+              <th>Protocolo</th>
+              <th>Oportunidades</th>
+              <th>Lucro Médio</th>
+              <th>Lucro Máximo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.id} style={!r.hasData ? { opacity: 0.45 } : {}}>
+                <td>{r.label}</td>
+                <td style={{ color: '#aaa' }}>{r.protocol}</td>
+                <td>{r.hasData ? r.opp : '—'}</td>
+                <td className={r.hasData ? clr(r.avgProfit) : ''}>{r.hasData ? fmtUSD(r.avgProfit) : '—'}</td>
+                <td className={r.hasData ? clr(r.maxProfit) : ''}>{r.hasData ? fmtUSD(r.maxProfit) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── LIQUIDATIONS TAB ─────────────────────────────────────────────────────────
+function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea, dataCompoundBase, dataMorphoBase, dataCompoundPolygon, dataCompoundArb, dataCompoundOp, dataMorphoPolygon, dataMorphoArb }) {
+  const [l1Tab,         setL1Tab]         = useState('resumo');
+  const [aaveChain,     setAaveChain]     = useState('base');
+  const [compoundChain, setCompoundChain] = useState('compound_base');
+  const [morphoChain,   setMorphoChain]   = useState('morpho_base');
+
+  const allData = {
+    base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb,
+    op: dataOp, scroll: dataScroll, linea: dataLinea,
+    compound_base: dataCompoundBase, compound_polygon: dataCompoundPolygon,
+    compound_arb: dataCompoundArb, compound_op: dataCompoundOp,
+    morpho_base: dataMorphoBase, morpho_polygon: dataMorphoPolygon, morpho_arb: dataMorphoArb,
+  };
+
+  const L1_TABS = [
+    { id: 'resumo',   label: 'Resumo',      color: '#e8b800' },
+    { id: 'aave',     label: 'Aave V3',     color: '#B6509E' },
+    { id: 'compound', label: 'Compound V3', color: '#00D395' },
+    { id: 'morpho',   label: 'Morpho Blue', color: '#2470FF' },
+  ];
+
+  const AAVE_CHAINS = [
+    { id: 'base',    label: 'Base',      color: '#2d6ae0' },
+    { id: 'polygon', label: 'Polygon',   color: '#8247e5' },
+    { id: 'avax',    label: 'Avalanche', color: '#e84142' },
+    { id: 'arb',     label: 'Arbitrum',  color: '#28A0F0' },
+    { id: 'op',      label: 'Optimism',  color: '#FF0420' },
+    { id: 'scroll',  label: 'Scroll',    color: '#FFDBB0' },
+    { id: 'linea',   label: 'Linea',     color: '#61DFFF' },
+  ];
+
+  const COMPOUND_CHAINS = [
+    { id: 'compound_base',    label: 'Base',     color: '#00D395' },
+    { id: 'compound_polygon', label: 'Polygon',  color: '#00A86B' },
+    { id: 'compound_arb',     label: 'Arbitrum', color: '#00B4D8' },
+    { id: 'compound_op',      label: 'Optimism', color: '#E8533F' },
+  ];
+
+  const MORPHO_CHAINS = [
+    { id: 'morpho_base',    label: 'Base',     color: '#2470FF' },
+    { id: 'morpho_polygon', label: 'Polygon',  color: '#9B59B6' },
+    { id: 'morpho_arb',     label: 'Arbitrum', color: '#1A9FFF' },
+  ];
 
   const DESCRIPTIONS = {
     base:             'Aave V3 — protocolo de lending líder. Liquidas posições subcapitalizadas e recebes 5–7% de bonus.',
@@ -862,13 +1079,56 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
     scroll:           'Aave V3 no Scroll — L2 nova com poucos bots competidores. Menor volume mas maior facilidade de captura.',
     linea:            'Aave V3 no Linea — L2 nova da Consensys. Actividade crescente, competição baixa.',
     compound_base:    'Compound V3 (Comet) na Base — protocolo alternativo ao Aave. Bonus de liquidação 8–10%, maior que o Aave.',
-    morpho_base:      'Morpho Blue na Base — mercados isolados com LIF até 15%. 5000+ posições, o maior volume de todos os protocolos.',
     compound_polygon: 'Compound V3 (Comet) na Polygon — dois mercados: USDC + USDT. Bonus 8%, gas em MATIC (~$0.01), menos competição que Base.',
-    compound_arb:     'Compound V3 (Comet) no Arbitrum — dois mercados: USDC + USDT. Bonus 8%, gas em ETH. Alto volume de posições, maior min_profit ($25).',
-    compound_op:      'Compound V3 (Comet) no Optimism — dois mercados: USDC + USDT. Bonus 8%, gas em ETH (~$0.001). L2 com boa actividade e competição moderada.',
-    morpho_polygon:   'Morpho Blue na Polygon — mercados isolados com LIF variável. Gas em MATIC (~$0.01). Protocolo novo na Polygon, competição baixa.',
-    morpho_arb:       'Morpho Blue no Arbitrum — mercados isolados com LIF variável. Gas em ETH. Alto volume, mesmo protocolo que a Base com mais posições.',
+    compound_arb:     'Compound V3 (Comet) no Arbitrum — dois mercados: USDC + USDT. Bonus 8%, gas em ETH. Alto volume de posições.',
+    compound_op:      'Compound V3 (Comet) no Optimism — dois mercados: USDC + USDT. Bonus 8%, gas em ETH (~$0.001). L2 com boa actividade.',
+    morpho_base:      'Morpho Blue na Base — mercados isolados com LIF até 15%. 5000+ posições, o maior volume de todos os protocolos.',
+    morpho_polygon:   'Morpho Blue na Polygon — mercados isolados com LIF variável. Gas em MATIC (~$0.01). Protocolo novo, competição baixa.',
+    morpho_arb:       'Morpho Blue no Arbitrum — mercados isolados com LIF variável. Gas em ETH. Alto volume, mesmo protocolo que a Base.',
   };
+
+  const l1BtnStyle = (id, color) => ({
+    padding: '0.45rem 1.4rem',
+    borderRadius: 4,
+    border: l1Tab === id ? `2px solid ${color}` : '2px solid transparent',
+    cursor: 'pointer',
+    fontSize: '0.92em',
+    fontWeight: l1Tab === id ? 700 : 400,
+    background: l1Tab === id ? color : '#2a2a2a',
+    color: l1Tab === id ? (id === 'resumo' ? '#111' : '#fff') : '#ccc',
+    transition: 'background 0.15s',
+  });
+
+  const chipStyle = (id, activeId, color) => ({
+    padding: '0.28rem 0.9rem',
+    borderRadius: 4,
+    border: activeId === id ? `2px solid ${color}` : '2px solid #333',
+    cursor: 'pointer',
+    fontSize: '0.82em',
+    fontWeight: activeId === id ? 700 : 400,
+    background: activeId === id ? color : '#1a1a1a',
+    color: '#fff',
+    transition: 'background 0.15s',
+  });
+
+  let activeChainId   = null;
+  let activeChains    = null;
+  let setActiveChain  = null;
+  if (l1Tab === 'aave') {
+    activeChainId  = aaveChain;
+    activeChains   = AAVE_CHAINS;
+    setActiveChain = setAaveChain;
+  } else if (l1Tab === 'compound') {
+    activeChainId  = compoundChain;
+    activeChains   = COMPOUND_CHAINS;
+    setActiveChain = setCompoundChain;
+  } else if (l1Tab === 'morpho') {
+    activeChainId  = morphoChain;
+    activeChains   = MORPHO_CHAINS;
+    setActiveChain = setMorphoChain;
+  }
+
+  const activeColor = activeChains?.find(c => c.id === activeChainId)?.color ?? '#444';
 
   return (
     <div>
@@ -881,29 +1141,70 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
         paddingBottom: '0.75rem',
         marginBottom: '1rem',
       }}>
-        <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', whiteSpace: 'nowrap', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-          {CHAINS.map(({ id, label, activeColor }) => (
-            <button key={id} onClick={() => setSubTab(id)} style={subBtnStyle(id, activeColor)}>
+        {/* Level 1 tabs */}
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: activeChains ? '0.65rem' : 0 }}>
+          {L1_TABS.map(({ id, label, color }) => (
+            <button key={id} onClick={() => setL1Tab(id)} style={l1BtnStyle(id, color)}>
               {label}
             </button>
           ))}
         </div>
-      </div>
-      {DESCRIPTIONS[subTab] && (
-        <div style={{
-          fontSize: '0.82em', color: '#888', marginBottom: '1.1rem',
-          padding: '0.5rem 0.75rem', background: '#151515',
-          borderRadius: 4, borderLeft: `3px solid ${CHAINS.find(c => c.id === subTab)?.activeColor ?? '#444'}`,
-        }}>
-          {DESCRIPTIONS[subTab]}
-        </div>
-      )}
-      {!active
-        ? <div style={{ color: '#888', padding: '2rem 0', textAlign: 'center' }}>
-            Sem dados {chainLabel} ainda
+
+        {/* Level 2 chain chips */}
+        {activeChains && (
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            {activeChains.map(({ id, label, color }) => (
+              <button key={id} onClick={() => setActiveChain(id)} style={chipStyle(id, activeChainId, color)}>
+                {label}
+              </button>
+            ))}
           </div>
-        : <LiquidationsPanel key={subTab} data={active} />
-      }
+        )}
+      </div>
+
+      {l1Tab === 'resumo' && <ResumoPanel allData={allData} />}
+
+      {l1Tab !== 'resumo' && activeChainId && (() => {
+        const MIN_PROFIT_DEFAULTS = {
+          base:             8,
+          polygon:          5,
+          avax:             10,
+          arb:              8,
+          op:               8,
+          scroll:           5,
+          linea:            5,
+          compound_base:    8,
+          compound_polygon: 5,
+          compound_arb:     8,
+          compound_op:      8,
+          morpho_base:      8,
+          morpho_polygon:   5,
+          morpho_arb:       8,
+        };
+        const data = allData[activeChainId];
+        const desc = DESCRIPTIONS[activeChainId];
+        const chainLabel = activeChains?.find(c => c.id === activeChainId)?.label ?? activeChainId;
+        const defaultMin = MIN_PROFIT_DEFAULTS[activeChainId] ?? 25;
+        return (
+          <>
+            {desc && (
+              <div style={{
+                fontSize: '0.82em', color: '#888', marginBottom: '1.1rem',
+                padding: '0.5rem 0.75rem', background: '#151515',
+                borderRadius: 4, borderLeft: `3px solid ${activeColor}`,
+              }}>
+                {desc}
+              </div>
+            )}
+            {!data
+              ? <div style={{ color: '#888', padding: '2rem 0', textAlign: 'center' }}>
+                  Sem dados {chainLabel} ainda
+                </div>
+              : <LiquidationsPanel key={activeChainId} data={data} defaultMinProfit={defaultMin} />
+            }
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -1295,7 +1596,7 @@ export default function App() {
       </nav>
 
       <main className="content" key={activeTab}>
-        {activeTab === 'overview'  && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} flashArb={flashArb} />}
+        {activeTab === 'overview'  && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} flashArb={flashArb} system={system} liquidationsAll={{ base: liquidations, polygon: liquidationsPolygon, avax: liquidationsAvax, arb: liquidationsArb, op: liquidationsOp, scroll: liquidationsScroll, linea: liquidationsLinea, compound_base: liquidationsCompoundBase, compound_polygon: liquidationsCompoundPolygon, compound_arb: liquidationsCompoundArb, compound_op: liquidationsCompoundOp, morpho_base: liquidationsMorphoBase, morpho_polygon: liquidationsMorphoPolygon, morpho_arb: liquidationsMorphoArb }} errors={errors} />}
         {activeTab === 'ibkr'     && (errors.ibkr    ? <Err msg={errors.ibkr}    /> : <IBKRTab    data={ibkr}    />)}
         {activeTab === 'sniper'   && (errors.sniper  ? <Err msg={errors.sniper}  /> : <SniperTab  data={sniper}  />)}
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}

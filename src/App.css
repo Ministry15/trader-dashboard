@@ -337,6 +337,34 @@ html, body, #root {
   letter-spacing: .08em;
 }
 
+/* ─── KPI row (Liquidations panels) ─────────────────────────────────────── */
+.kpi-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.kpi-card {
+  flex: 1 1 160px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--green);
+  border-radius: 4px;
+  padding: 12px 14px;
+}
+
+.kpi-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--green);
+  line-height: 1;
+  margin-top: 6px;
+}
+
+.kpi-value.pos { color: var(--green); }
+.kpi-value.neg { color: var(--red); }
+
 /* ─── Grid helpers ───────────────────────────────────────────────────────── */
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
