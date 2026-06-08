@@ -817,7 +817,7 @@ function LiquidationsPanel({ data }) {
   );
 }
 
-function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea, dataCompoundBase, dataMorphoBase, dataCompoundPolygon, dataCompoundArb, dataCompoundOp, dataMorphoPolygon }) {
+function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dataScroll, dataLinea, dataCompoundBase, dataMorphoBase, dataCompoundPolygon, dataCompoundArb, dataCompoundOp, dataMorphoPolygon, dataMorphoArb }) {
   const [subTab, setSubTab] = useState('base');
 
   const CHAINS = [
@@ -834,6 +834,7 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
     { id: 'compound_arb',     label: 'Cmpd Arb',    activeColor: '#00B4D8' },
     { id: 'compound_op',      label: 'Cmpd OP',     activeColor: '#E8533F' },
     { id: 'morpho_polygon',   label: 'Morpho Poly', activeColor: '#9B59B6' },
+    { id: 'morpho_arb',       label: 'Morpho Arb',  activeColor: '#1A9FFF' },
   ];
 
   const subBtnStyle = (id, activeColor) => ({
@@ -848,7 +849,7 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
     transition: 'background 0.15s',
   });
 
-  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb, op: dataOp, scroll: dataScroll, linea: dataLinea, compound_base: dataCompoundBase, morpho_base: dataMorphoBase, compound_polygon: dataCompoundPolygon, compound_arb: dataCompoundArb, compound_op: dataCompoundOp, morpho_polygon: dataMorphoPolygon };
+  const dataMap = { base: dataBase, polygon: dataPolygon, avax: dataAvax, arb: dataArb, op: dataOp, scroll: dataScroll, linea: dataLinea, compound_base: dataCompoundBase, morpho_base: dataMorphoBase, compound_polygon: dataCompoundPolygon, compound_arb: dataCompoundArb, compound_op: dataCompoundOp, morpho_polygon: dataMorphoPolygon, morpho_arb: dataMorphoArb };
   const active = dataMap[subTab];
   const chainLabel = CHAINS.find(c => c.id === subTab)?.label ?? subTab;
 
@@ -866,6 +867,7 @@ function LiquidationsTab({ dataBase, dataPolygon, dataAvax, dataArb, dataOp, dat
     compound_arb:     'Compound V3 (Comet) no Arbitrum — dois mercados: USDC + USDT. Bonus 8%, gas em ETH. Alto volume de posições, maior min_profit ($25).',
     compound_op:      'Compound V3 (Comet) no Optimism — dois mercados: USDC + USDT. Bonus 8%, gas em ETH (~$0.001). L2 com boa actividade e competição moderada.',
     morpho_polygon:   'Morpho Blue na Polygon — mercados isolados com LIF variável. Gas em MATIC (~$0.01). Protocolo novo na Polygon, competição baixa.',
+    morpho_arb:       'Morpho Blue no Arbitrum — mercados isolados com LIF variável. Gas em ETH. Alto volume, mesmo protocolo que a Base com mais posições.',
   };
 
   return (
@@ -1164,11 +1166,12 @@ export default function App() {
   const [liquidationsCompoundArb,     setLiquidationsCompoundArb]     = useState(null);
   const [liquidationsCompoundOp,      setLiquidationsCompoundOp]      = useState(null);
   const [liquidationsMorphoPolygon,   setLiquidationsMorphoPolygon]   = useState(null);
+  const [liquidationsMorphoArb,       setLiquidationsMorphoArb]       = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR, liquidationsMorphoBaseR, liquidationsCompoundPolygonR, liquidationsCompoundArbR, liquidationsCompoundOpR, liquidationsMorphoPolygonR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR, liquidationsMorphoBaseR, liquidationsCompoundPolygonR, liquidationsCompoundArbR, liquidationsCompoundOpR, liquidationsMorphoPolygonR, liquidationsMorphoArbR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
@@ -1189,6 +1192,7 @@ export default function App() {
       apiFetch('/api/liquidations/compound_arb'),
       apiFetch('/api/liquidations/compound_op'),
       apiFetch('/api/liquidations/morpho_polygon'),
+      apiFetch('/api/liquidations/morpho_arb'),
     ]);
     if (pnlR.status                === 'fulfilled') setPnl(pnlR.value);                           else errs.pnl          = pnlR.reason?.message;
     if (ibkrR.status               === 'fulfilled') setIbkr(ibkrR.value);                         else errs.ibkr         = ibkrR.reason?.message;
@@ -1210,6 +1214,7 @@ export default function App() {
     if (liquidationsCompoundArbR.status     === 'fulfilled') setLiquidationsCompoundArb(liquidationsCompoundArbR.value);
     if (liquidationsCompoundOpR.status      === 'fulfilled') setLiquidationsCompoundOp(liquidationsCompoundOpR.value);
     if (liquidationsMorphoPolygonR.status   === 'fulfilled') setLiquidationsMorphoPolygon(liquidationsMorphoPolygonR.value);
+    if (liquidationsMorphoArbR.status       === 'fulfilled') setLiquidationsMorphoArb(liquidationsMorphoArbR.value);
     setErrors(errs);
     setOnline(Object.keys(errs).length < 7);
     setLoading(false);
@@ -1296,7 +1301,7 @@ export default function App() {
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
         {activeTab === 'funding'  && (errors.funding ? <Err msg={errors.funding} /> : <FundingTab data={funding} />)}
         {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
-        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} dataMorphoBase={liquidationsMorphoBase} dataCompoundPolygon={liquidationsCompoundPolygon} dataCompoundArb={liquidationsCompoundArb} dataCompoundOp={liquidationsCompoundOp} dataMorphoPolygon={liquidationsMorphoPolygon} />)}
+        {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} dataMorphoBase={liquidationsMorphoBase} dataCompoundPolygon={liquidationsCompoundPolygon} dataCompoundArb={liquidationsCompoundArb} dataCompoundOp={liquidationsCompoundOp} dataMorphoPolygon={liquidationsMorphoPolygon} dataMorphoArb={liquidationsMorphoArb} />)}
         {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
       </main>
