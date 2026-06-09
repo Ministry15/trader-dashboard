@@ -1,25 +1,22 @@
-"""Bot de liquidações Aave V3 na chain Base.
+"""Bot de liquidações Aave V3 na chain Polygon.
 
-Estratégia:
+Estratégia idêntica ao aave_liquidator_bot.py (Base), mas independente:
   1. Mantém lista de mutuários via scanning de eventos Borrow
   2. Verifica health factor de cada posição a cada poll_seconds
-  3. Posições com HF < health_factor_threshold (default: 1.05):
+  3. Posições com HF < health_factor_threshold (default: 1.0):
        – Calcula dívida a cobrir (50% do total, limite Aave)
        – Estima colateral a receber (dívida × (1 + bonus))
-       – Estima custo de gas (Base L2 muito barato)
+       – Estima custo de gas (Polygon usa MATIC)
        – Calcula lucro líquido em USD
   4. DRY_RUN=true: regista oportunidade na BD, NÃO executa
   5. DRY_RUN=false: chama contrato de flash loan para executar
+       (requer flash_loan_contract em settings.yaml aave_liquidator_polygon)
 
-Contratos Aave V3 Base (mainnet, chain 8453):
-  Pool:                0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
-  PoolAddressProvider: 0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D
-  PriceOracle:         0x2Cc0Fc26eD4563A5ce5e8bdcfe1a2878676Ae156
+Contratos Aave V3 Polygon (mainnet, chain 137):
+  Pool:        0x794a61358D6845594F94dc1DB02A252b5b4814aD
+  PriceOracle: 0xb023e699F5a33916Ea823A16485e259257cA8Bd1
 
-Contrato de liquidação (flash loan deployado):
-  0x9531F6F28202B7E83717b31992035F769046135B
-
-RPC: ALCHEMY_BASE_URL do .env (fallback: https://mainnet.base.org)
+RPC: ALCHEMY_POLYGON_URL do .env (fallback: https://polygon-rpc.com)
 """
 from __future__ import annotations
 
@@ -37,24 +34,28 @@ from utils.notifier import TelegramNotifier
 
 logger = get_logger(__name__)
 
-# ── Aave V3 Base — endereços ────────────────────────────────────────────────
+# ── Aave V3 Polygon — endereços ──────────────────────────────────────────────
 
-POOL_ADDRESS       = Web3.to_checksum_address("0xA238Dd80C259a72e81d7e4664a9801593F98d1c5")
-ORACLE_ADDRESS     = Web3.to_checksum_address("0x2Cc0Fc26eD4563A5ce5e8bdcfe1a2878676Ae156")
-FLASH_LIQ_ADDRESS      = Web3.to_checksum_address("0x843730A2114b8624a36B4D4956aDdc6005bc5c30")
-DATA_PROVIDER_ADDRESS  = Web3.to_checksum_address("0x0F43731EB8d45A581f4a36DD74F5f358bc90C73A")
-BASE_CHAIN_ID          = 8453
-WETH_BASE          = "0x4200000000000000000000000000000000000006"
+POOL_ADDRESS          = Web3.to_checksum_address("0x794a61358D6845594F94dc1DB02A252b5b4814aD")
+ORACLE_ADDRESS        = Web3.to_checksum_address("0xb023e699F5a33916Ea823A16485e259257cA8Bd1")
+DATA_PROVIDER_ADDRESS = Web3.to_checksum_address("0x243Aa95cAC2a25651eda86e80bEe66114413c43b")
+POLYGON_CHAIN_ID      = 137
+WMATIC_POLYGON    = "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"  # gas token para custo USD
+_POLYGON_FALLBACK_RPC = "https://polygon-bor-rpc.publicnode.com"
 
-# Bonus de liquidação confirmados (Aave V3 Base governance proposal)
+# Bonus de liquidação Aave V3 Polygon (valores conservadores)
 _BONUS: dict[str, float] = {
-    "0x4200000000000000000000000000000000000006": 0.050,  # WETH  → 5%
-    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": 0.050,  # USDC  → 5%
-    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": 0.050,  # USDbC → 5%
-    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": 0.075,  # cbETH → 7.5%
-    "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452": 0.070,  # wstETH→ 7%
+    "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": 0.050,  # WMATIC  → 5%
+    "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": 0.050,  # WETH    → 5%
+    "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": 0.050,  # USDC.e  → 5%
+    "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": 0.050,  # USDC    → 5%
+    "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": 0.050,  # USDT    → 5%
+    "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063": 0.050,  # DAI     → 5%
+    "0x03b54a6e9a984069379fae1a4fc4dbae93b3bccd": 0.070,  # wstETH  → 7%
+    "0xfa68fb4628dff1028cfec22b4162fccd0d45efb6": 0.075,  # MaticX  → 7.5%
+    "0x4e3decbb3645551b8a19f0ea1678079fcb33fb4c": 0.075,  # stMATIC → 7.5%
 }
-_DEFAULT_BONUS     = 0.050  # 5% conservador
+_DEFAULT_BONUS    = 0.050  # 5% conservador
 
 _HF_LIQUIDATABLE = 1.0      # Aave V3: só liquidável quando HF < 1.0 (monitorização em 1.2)
 _DEBT_MIN_USD    = 500.0
@@ -62,18 +63,19 @@ _DEBT_MAX_USD    = 50_000.0
 _BLACKLIST_FAILS = 3
 
 _TOKEN_SYMBOLS: dict[str, str] = {
-    "0x4200000000000000000000000000000000000006": "WETH",
-    "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": "cbBTC",
-    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": "cbETH",
-    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": "USDC",
-    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb": "DAI",
-    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": "USDbC",
+    "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": "WMATIC",
+    "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": "WETH",
+    "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": "USDC.e",
+    "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": "USDC",
+    "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": "USDT",
+    "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063": "DAI",
+    "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6": "WBTC",
 }
 
-_GAS_UNITS         = 500_000   # estimativa para flash loan + liquidação
-_ORACLE_DECIMALS   = 8         # Aave oracle: USD com 8 decimais
-_HF_DECIMALS       = 18        # healthFactor em ray (1e18)
-_ACCOUNT_DECIMALS  = 8         # totalCollateralBase/totalDebtBase em USD×1e8
+_GAS_UNITS        = 500_000   # estimativa flash loan + liquidação
+_ORACLE_DECIMALS  = 8         # Aave oracle: USD com 8 decimais
+_HF_DECIMALS      = 18        # healthFactor em ray (1e18)
+_ACCOUNT_DECIMALS = 8         # totalCollateralBase/totalDebtBase em USD×1e8
 
 MULTICALL3_ADDRESS = Web3.to_checksum_address("0xcA11bde05977b3631167028862bE2a173976CA11")
 _MULTICALL3_CHUNK  = 500  # max calls por aggregate3
@@ -152,13 +154,13 @@ _POOL_ABI = [
     {
         "anonymous": False,
         "inputs": [
-            {"indexed": True,  "name": "collateralAsset",           "type": "address"},
-            {"indexed": True,  "name": "debtAsset",                 "type": "address"},
-            {"indexed": True,  "name": "user",                      "type": "address"},
-            {"indexed": False, "name": "debtToCover",               "type": "uint256"},
-            {"indexed": False, "name": "liquidatedCollateralAmount", "type": "uint256"},
-            {"indexed": False, "name": "liquidator",                "type": "address"},
-            {"indexed": False, "name": "receiveAToken",             "type": "bool"},
+            {"indexed": True,  "name": "collateralAsset",            "type": "address"},
+            {"indexed": True,  "name": "debtAsset",                  "type": "address"},
+            {"indexed": True,  "name": "user",                       "type": "address"},
+            {"indexed": False, "name": "debtToCover",                "type": "uint256"},
+            {"indexed": False, "name": "liquidatedCollateralAmount",  "type": "uint256"},
+            {"indexed": False, "name": "liquidator",                 "type": "address"},
+            {"indexed": False, "name": "receiveAToken",              "type": "bool"},
         ],
         "name": "LiquidationCall",
         "type": "event",
@@ -188,11 +190,11 @@ _ERC20_DECIMALS_ABI = [
 _FLASH_LIQ_ABI = [
     {
         "inputs": [
-            {"name": "debtAsset",      "type": "address"},
-            {"name": "collateralAsset","type": "address"},
-            {"name": "borrower",       "type": "address"},
-            {"name": "debtAmount",     "type": "uint256"},
-            {"name": "poolFee",        "type": "uint24"},
+            {"name": "debtAsset",       "type": "address"},
+            {"name": "collateralAsset", "type": "address"},
+            {"name": "borrower",        "type": "address"},
+            {"name": "debtAmount",      "type": "uint256"},
+            {"name": "poolFee",         "type": "uint24"},
         ],
         "name": "executeFlashLiquidation",
         "outputs": [],
@@ -232,7 +234,7 @@ _MULTICALL3_ABI = [
 
 
 @dataclass
-class LiqOpportunity:
+class LiqOpportunityPolygon:
     borrower: str
     health_factor: float
     total_collateral_usd: float
@@ -242,54 +244,63 @@ class LiqOpportunity:
     liquidation_bonus_pct: float
     gas_cost_usd: float
     net_profit_usd: float
-    debt_asset: str   = field(default="")
+    debt_asset: str      = field(default="")
     collateral_asset: str = field(default="")
 
 
 # ── Bot ───────────────────────────────────────────────────────────────────────
 
-class AaveLiquidatorBot:
-    """Monitoriza e (em modo live) executa liquidações Aave V3 na Base chain."""
+class AaveLiquidatorPolygonBot:
+    """Monitoriza e (em modo live) executa liquidações Aave V3 na Polygon chain."""
 
     def __init__(self, settings: dict | None = None):
         self.settings = settings or get_settings()
-        self.cfg = self.settings.get("bots", {}).get("aave_liquidator", {})
+        self.cfg = self.settings.get("bots", {}).get("aave_liquidator_polygon", {})
 
-        primary_rpc = get_env("ALCHEMY_BASE_URL") or "https://mainnet.base.org"
-        # Fallback público para quando o Alchemy faz rate-limit (429)
-        self._rpc_urls: list[str] = [primary_rpc, "https://mainnet.base.org"]
+        primary_rpc = get_env("ALCHEMY_POLYGON_URL") or _POLYGON_FALLBACK_RPC
+        self._rpc_urls: list[str] = [primary_rpc, _POLYGON_FALLBACK_RPC]
         self._active_rpc: str = primary_rpc
 
-        self.dry_run     : bool  = False
-        self.hf_threshold: float = float(self.cfg.get("health_factor_threshold", 1.0))
-        self.min_profit  : float = float(self.cfg.get("min_profit_usd", 8.0))
-        self.scan_blocks : int   = int(self.cfg.get("borrower_scan_blocks", 50_000))
-        self.max_per_tick: int   = int(self.cfg.get("max_positions_per_tick", 50))
+        self.dry_run      : bool  = False
+        self.hf_threshold : float = float(self.cfg.get("health_factor_threshold", 1.0))
+        self.min_profit   : float = float(self.cfg.get("min_profit_usd", 5.0))
+        self.scan_blocks  : int   = int(self.cfg.get("borrower_scan_blocks", 50_000))
+        self.max_per_tick : int   = int(self.cfg.get("max_positions_per_tick", 50))
 
-        self.w3 = Web3(Web3.HTTPProvider(primary_rpc, request_kwargs={"timeout": 30}))
+        flash_addr = get_env("FLASH_LOAN_CONTRACT_POLYGON") or self.cfg.get("flash_loan_contract", "")
 
-        self.pool    = self.w3.eth.contract(address=POOL_ADDRESS,      abi=_POOL_ABI)
-        self.oracle  = self.w3.eth.contract(address=ORACLE_ADDRESS,    abi=_ORACLE_ABI)
-        self.flash         = self.w3.eth.contract(address=FLASH_LIQ_ADDRESS,     abi=_FLASH_LIQ_ABI)
+        self.w3     = Web3(Web3.HTTPProvider(primary_rpc, request_kwargs={"timeout": 30}))
+        self.pool   = self.w3.eth.contract(address=POOL_ADDRESS,   abi=_POOL_ABI)
+        self.oracle = self.w3.eth.contract(address=ORACLE_ADDRESS, abi=_ORACLE_ABI)
+        self.flash  = (
+            self.w3.eth.contract(
+                address=Web3.to_checksum_address(flash_addr), abi=_FLASH_LIQ_ABI
+            ) if flash_addr else None
+        )
         self.multicall     = self.w3.eth.contract(address=MULTICALL3_ADDRESS,    abi=_MULTICALL3_ABI)
         self.data_provider = self.w3.eth.contract(address=DATA_PROVIDER_ADDRESS, abi=_POOL_ABI)
 
         self._borrowers: set[str] = set()
         self._scan_from: int = 0
         self._reserves : list[str] = []
-        self._eth_price_cache: float = 2000.0
-        self._eth_price_ts   : float = 0.0
-        self._decimals_cache : dict[str, int] = {}
-        self._price_cache    : dict[str, int] = {}
-        self._cooldown       : dict[str, float] = {}
-        self._fail_counts    : dict[str, int]   = {}
-        self._blacklist      : dict[str, float] = {}
+        self._matic_price_cache: float = 0.80
+        self._matic_price_ts   : float = 0.0
+        self._decimals_cache   : dict[str, int] = {}
+        self._price_cache      : dict[str, int] = {}
+        self._cooldown         : dict[str, float] = {}
+        self._fail_counts      : dict[str, int]   = {}
+        self._blacklist        : dict[str, float] = {}
 
         self.notifier = TelegramNotifier(self.settings)
         init_db()
 
+        if not flash_addr:
+            logger.warning(
+                "AavePolygon: flash_loan_contract não configurado — modo DRY_RUN forçado para live"
+            )
+
         logger.info(
-            "AaveLiquidatorBot: rpc=%s dry_run=%s hf<%.2f min_profit=$%.2f",
+            "AavePolygon: rpc=%s dry_run=%s hf<%.2f min_profit=$%.2f",
             primary_rpc.split("//")[-1].split("/")[0], self.dry_run,
             self.hf_threshold, self.min_profit,
         )
@@ -304,14 +315,18 @@ class AaveLiquidatorBot:
             try:
                 test_w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 15}))
                 test_w3.eth.block_number
-                self.w3 = test_w3
+                self.w3     = test_w3
                 self._active_rpc = url
-                self.pool  = self.w3.eth.contract(address=POOL_ADDRESS,   abi=_POOL_ABI)
-                self.oracle= self.w3.eth.contract(address=ORACLE_ADDRESS,  abi=_ORACLE_ABI)
-                self.flash         = self.w3.eth.contract(address=FLASH_LIQ_ADDRESS,     abi=_FLASH_LIQ_ABI)
+                self.pool   = self.w3.eth.contract(address=POOL_ADDRESS,   abi=_POOL_ABI)
+                self.oracle = self.w3.eth.contract(address=ORACLE_ADDRESS, abi=_ORACLE_ABI)
+                if self.flash is not None:
+                    self.flash = self.w3.eth.contract(
+                        address=self.flash.address, abi=_FLASH_LIQ_ABI
+                    )
                 self.multicall     = self.w3.eth.contract(address=MULTICALL3_ADDRESS,    abi=_MULTICALL3_ABI)
                 self.data_provider = self.w3.eth.contract(address=DATA_PROVIDER_ADDRESS, abi=_POOL_ABI)
-                logger.warning("RPC trocado para fallback: %s", url.split("//")[-1].split("/")[0])
+                logger.warning("AavePolygon: RPC trocado para fallback: %s",
+                               url.split("//")[-1].split("/")[0])
                 return True
             except Exception:
                 continue
@@ -327,43 +342,44 @@ class AaveLiquidatorBot:
                 if status == 429:
                     if attempt == 0:
                         logger.warning(
-                            "Alchemy rate-limit (429) — a tentar fallback RPC (tentativa %d/3)",
+                            "AavePolygon: rate-limit (429) — a tentar fallback RPC (tentativa %d/3)",
                             attempt + 1,
                         )
                         if self._switch_rpc(self._active_rpc):
                             continue
                     wait = 2 ** attempt
-                    logger.debug("429 rate-limit, aguardar %ds…", wait)
+                    logger.debug("AavePolygon: 429 rate-limit, aguardar %ds…", wait)
                     time.sleep(wait)
                 else:
-                    logger.debug("HTTP %s ao verificar ligação: %s", status, exc)
+                    logger.debug("AavePolygon: HTTP %s ao verificar ligação: %s", status, exc)
                     return False
             except Exception as exc:
-                logger.debug("Erro ao verificar ligação RPC: %s", exc)
-                if attempt == 0 and self._active_rpc != "https://mainnet.base.org":
+                logger.debug("AavePolygon: erro ao verificar ligação RPC: %s", exc)
+                if attempt == 0 and self._active_rpc != _POLYGON_FALLBACK_RPC:
                     if self._switch_rpc(self._active_rpc):
                         continue
                 return False
         return False
 
-    def _eth_price(self) -> float:
+    def _matic_price(self) -> float:
         now = time.time()
-        if now - self._eth_price_ts < 300:
-            return self._eth_price_cache
+        if now - self._matic_price_ts < 300:
+            return self._matic_price_cache
         try:
             raw = self.oracle.functions.getAssetPrice(
-                Web3.to_checksum_address(WETH_BASE)).call()
-            self._eth_price_cache = raw / 10 ** _ORACLE_DECIMALS
-            self._eth_price_ts    = now
+                Web3.to_checksum_address(WMATIC_POLYGON)).call()
+            self._matic_price_cache = raw / 10 ** _ORACLE_DECIMALS
+            self._matic_price_ts    = now
         except Exception as exc:
-            logger.debug("Oracle ETH price falhou: %s — cache $%.2f", exc, self._eth_price_cache)
-        return self._eth_price_cache
+            logger.debug("AavePolygon: oracle MATIC price falhou: %s — cache $%.4f",
+                         exc, self._matic_price_cache)
+        return self._matic_price_cache
 
     def _gas_price_gwei(self) -> float:
         try:
             return self.w3.eth.gas_price / 1e9
         except Exception:
-            return 0.005   # Base L2: ~0.005 Gwei típico
+            return 30.0   # Polygon: ~30 Gwei típico
 
     def _token_decimals(self, token: str) -> int:
         key = token.lower()
@@ -402,7 +418,7 @@ class AaveLiquidatorBot:
             try:
                 raw.extend(self.multicall.functions.aggregate3(chunk).call())
             except Exception as exc:
-                logger.warning("Multicall3 account_data chunk [%d] falhou: %s", i, exc)
+                logger.warning("AavePolygon: Multicall3 account_data chunk [%d] falhou: %s", i, exc)
                 raw.extend([(False, b"")] * len(chunk))
         result: dict[str, dict] = {}
         for b, (success, ret) in zip(borrowers, raw):
@@ -419,7 +435,7 @@ class AaveLiquidatorBot:
                 }
             except Exception:
                 continue
-        logger.info("Multicall3 account_data: %d borrowers → %d com dívida",
+        logger.info("AavePolygon: Multicall3 account_data: %d borrowers → %d com dívida",
                     len(borrowers), len(result))
         return result
 
@@ -447,7 +463,7 @@ class AaveLiquidatorBot:
             try:
                 raw.extend(self.multicall.functions.aggregate3(chunk).call())
             except Exception as exc:
-                logger.warning("Multicall3 reserve_data chunk [%d] falhou: %s", i, exc)
+                logger.warning("AavePolygon: Multicall3 reserve_data chunk [%d] falhou: %s", i, exc)
                 raw.extend([(False, b"")] * len(chunk))
         result: dict[str, dict] = {}
         for (borrower, reserve), (success, ret) in zip(index_map, raw):
@@ -462,8 +478,8 @@ class AaveLiquidatorBot:
                 debt_val   = var_debt * price
                 col_val    = a_bal * price if use_as_col else 0
                 entry = result.setdefault(borrower, {
-                    "best_debt_val": 0, "debt_asset": WETH_BASE,
-                    "best_col_val":  0, "col_asset":  WETH_BASE,
+                    "best_debt_val": 0, "debt_asset": WMATIC_POLYGON,
+                    "best_col_val":  0, "col_asset":  WMATIC_POLYGON,
                 })
                 if debt_val > entry["best_debt_val"]:
                     entry["best_debt_val"] = debt_val
@@ -474,7 +490,7 @@ class AaveLiquidatorBot:
             except Exception:
                 continue
         n_chunks = max(1, (len(calls) + _MULTICALL3_CHUNK - 1) // _MULTICALL3_CHUNK)
-        logger.info("Multicall3 reserve_data: %d×%d=%d calls em %d chunk(s) → %d resultados",
+        logger.info("AavePolygon: Multicall3 reserve_data: %d×%d=%d calls em %d chunk(s) → %d resultados",
                     len(borrowers), len(reserves), len(calls), n_chunks, len(result))
         return result
 
@@ -485,9 +501,9 @@ class AaveLiquidatorBot:
                     Web3.to_checksum_address(r)
                     for r in self.pool.functions.getReservesList().call()
                 ]
-                logger.info("Reserves Aave Base: %d activos", len(self._reserves))
+                logger.info("AavePolygon: Reserves Aave Polygon: %d activos", len(self._reserves))
             except Exception as exc:
-                logger.warning("getReservesList falhou: %s", exc)
+                logger.warning("AavePolygon: getReservesList falhou: %s", exc)
         return self._reserves
 
     # ── descoberta de mutuários ───────────────────────────────────────────────
@@ -499,7 +515,7 @@ class AaveLiquidatorBot:
         try:
             latest = self.w3.eth.block_number
         except Exception as exc:
-            logger.warning("Não consegui ler bloco actual: %s", exc)
+            logger.warning("AavePolygon: não consegui ler bloco actual: %s", exc)
             return
 
         from_block = self._scan_from or max(0, latest - self.scan_blocks)
@@ -517,12 +533,11 @@ class AaveLiquidatorBot:
                         added += 1
                 from_block = to_block + 1
             except Exception as exc:
-                logger.debug("Borrow events [%d..%d]: %s", from_block, to_block, exc)
-                break   # RPC limit — tentar na próxima tick
+                logger.debug("AavePolygon: Borrow events [%d..%d]: %s", from_block, to_block, exc)
+                break
 
         self._scan_from = latest
 
-        # Remover posições já liquidadas
         try:
             liq_start = max(0, latest - 5_000)
             liq_evts  = self.pool.events.LiquidationCall().get_logs(
@@ -533,7 +548,7 @@ class AaveLiquidatorBot:
             pass
 
         if added:
-            logger.info("Scan Borrow: +%d mutuários (total=%d, bloco=%d)",
+            logger.info("AavePolygon: Scan Borrow: +%d mutuários (total=%d, bloco=%d)",
                         added, len(self._borrowers), latest)
 
     # ── análise de posições ───────────────────────────────────────────────────
@@ -551,20 +566,20 @@ class AaveLiquidatorBot:
                 debt_raw / 10 ** _ACCOUNT_DECIMALS,
             )
         except (ContractLogicError, Exception) as exc:
-            logger.debug("getUserAccountData(%s…): %s", address[:10], exc)
+            logger.debug("AavePolygon: getUserAccountData(%s…): %s", address[:10], exc)
             return None
 
     def _estimate(self, borrower: str, hf: float,
                   col_usd: float, debt_usd: float,
-                  _pre: dict | None = None) -> LiqOpportunity:
+                  _pre: dict | None = None) -> LiqOpportunityPolygon:
         if _pre is not None:
             entry            = _pre.get(borrower.lower(), {})
-            debt_asset       = entry.get("debt_asset", WETH_BASE)
-            collateral_asset = entry.get("col_asset",  WETH_BASE)
+            debt_asset       = entry.get("debt_asset", WMATIC_POLYGON)
+            collateral_asset = entry.get("col_asset",  WMATIC_POLYGON)
         else:
             # fallback sequencial (Multicall3 falhou totalmente)
             reserves = self._reserves_list()
-            debt_asset = collateral_asset = WETH_BASE
+            debt_asset = collateral_asset = WMATIC_POLYGON
             best_debt_val = best_col_val = 0
             for reserve in reserves:
                 try:
@@ -585,13 +600,13 @@ class AaveLiquidatorBot:
                 except Exception:
                     continue
 
-        bonus            = _BONUS.get(collateral_asset.lower(), _DEFAULT_BONUS)
-        debt_to_cover    = debt_usd * 0.50   # Aave: máx 50% por liquidação
-        col_to_receive   = debt_to_cover * (1.0 + bonus)
-        gas_usd          = _GAS_UNITS * self._gas_price_gwei() * 1e-9 * self._eth_price()
-        net_profit       = col_to_receive - debt_to_cover - gas_usd
+        bonus          = _BONUS.get(collateral_asset.lower(), _DEFAULT_BONUS)
+        debt_to_cover  = debt_usd * 0.50
+        col_to_receive = debt_to_cover * (1.0 + bonus)
+        gas_usd        = _GAS_UNITS * self._gas_price_gwei() * 1e-9 * self._matic_price()
+        net_profit     = col_to_receive - debt_to_cover - gas_usd
 
-        return LiqOpportunity(
+        return LiqOpportunityPolygon(
             borrower=borrower,
             health_factor=round(hf, 6),
             total_collateral_usd=round(col_usd, 2),
@@ -607,7 +622,7 @@ class AaveLiquidatorBot:
 
     # ── execução / registo ────────────────────────────────────────────────────
 
-    def _record(self, opp: LiqOpportunity, executed: bool,
+    def _record(self, opp: LiqOpportunityPolygon, executed: bool,
                 tx_hash: str | None = None) -> None:
         rec_id, inserted = upsert_liquidation_opportunity(
             position_address=opp.borrower,
@@ -623,27 +638,35 @@ class AaveLiquidatorBot:
             tx_hash=tx_hash,
             dry_run=self.dry_run,
             status="dry_run" if self.dry_run else ("executed" if executed else "skipped"),
+            chain="polygon",
         )
         action = "INSERT" if inserted else "UPDATE"
-        logger.debug("BD %s id=%d %s HF=%.4f", action, rec_id, opp.borrower[:10], opp.health_factor)
+        logger.debug("AavePolygon: BD %s id=%d %s HF=%.4f",
+                     action, rec_id, opp.borrower[:10], opp.health_factor)
 
-    def _execute_live(self, opp: LiqOpportunity, nonce: int) -> str | None:
+    def _execute_live(self, opp: LiqOpportunityPolygon) -> str | None:
         """Executa flash loan liquidation via contrato deployado."""
+        if self.flash is None:
+            logger.error(
+                "AavePolygon: flash_loan_contract não configurado — não é possível executar live"
+            )
+            return None
         try:
             pk   = get_env("BSC_PRIVATE_KEY") or ""
             acct = self.w3.eth.account.from_key(pk)
-            # Converter USD → unidades de token (aproximação via oracle)
-            debt_oracle  = self._get_asset_price(opp.debt_asset)
-            token_dec    = self._token_decimals(opp.debt_asset)
-            debt_units   = int(opp.debt_to_cover_usd
-                               / (debt_oracle / 10 ** _ORACLE_DECIMALS)
-                               * 10 ** token_dec)
+            debt_oracle = self._get_asset_price(opp.debt_asset)
+            token_dec   = self._token_decimals(opp.debt_asset)
+            debt_units  = int(opp.debt_to_cover_usd
+                              / (debt_oracle / 10 ** _ORACLE_DECIMALS)
+                              * 10 ** token_dec)
 
             _POOL_FEES = {
-                "0x4200000000000000000000000000000000000006": 500,  # WETH
-                "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": 500,  # cbBTC
-                "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": 500,  # cbETH
-                "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": 100,  # USDC
+                "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": 500,   # WMATIC
+                "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": 500,   # WETH
+                "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": 100,   # USDC.e
+                "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": 100,   # USDC
+                "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": 100,   # USDT
+                "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063": 100,   # DAI
             }
             pool_fee = _POOL_FEES.get(opp.collateral_asset.lower(), 3000)
 
@@ -659,7 +682,7 @@ class AaveLiquidatorBot:
             except Exception as sim_exc:
                 self._cooldown[opp.borrower.lower()] = time.time() + 600
                 logger.warning(
-                    "Base: simulação falhou %s — cooldown 10min: %s",
+                    "AavePolygon: simulação falhou %s — cooldown 10min: %s",
                     opp.borrower[:10] + "…", sim_exc,
                 )
                 return None
@@ -672,32 +695,32 @@ class AaveLiquidatorBot:
                 pool_fee,
             ).build_transaction({
                 "from":     acct.address,
-                "chainId":  BASE_CHAIN_ID,
+                "chainId":  POLYGON_CHAIN_ID,
                 "gas":      _GAS_UNITS,
                 "gasPrice": int(self.w3.eth.gas_price * 1.15),
-                "nonce":    nonce,
+                "nonce":    self.w3.eth.get_transaction_count(acct.address, 'pending'),
             })
-            signed   = acct.sign_transaction(tx)
-            tx_hash  = self.w3.eth.send_raw_transaction(signed.raw_transaction)
-            logger.info("LIQUIDAÇÃO TX: %s", tx_hash.hex())
+            signed  = acct.sign_transaction(tx)
+            tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+            logger.info("AavePolygon: LIQUIDAÇÃO TX: %s", tx_hash.hex())
             return tx_hash.hex()
         except Exception as exc:
             if "HEALTH_FACTOR_NOT_BELOW_THRESHOLD" in str(exc):
                 until = time.time() + 600
                 self._cooldown[opp.borrower.lower()] = until
                 logger.warning(
-                    "Base: %s HF acima do threshold — cooldown 10min",
+                    "AavePolygon: %s HF acima do threshold — cooldown 10min",
                     opp.borrower[:10] + "…",
                 )
             else:
-                logger.error("Falha ao executar liquidação: %s", exc)
+                logger.error("AavePolygon: falha ao executar liquidação: %s", exc)
             return None
 
     # ── tick ─────────────────────────────────────────────────────────────────
 
     def tick(self) -> list[dict]:
         if not self._connected():
-            logger.warning("AaveLiquidator: sem ligação ao RPC Base — tick saltado")
+            logger.warning("AavePolygon: sem ligação ao RPC Polygon — tick saltado")
             return []
 
         self._scan_borrowers()
@@ -710,7 +733,7 @@ class AaveLiquidatorBot:
         # Fase 1: getUserAccountData de todos os candidatos → 1 Multicall3
         account_data = self._batch_account_data(candidates)
         if not account_data:
-            logger.warning("AaveLiquidator: Multicall3 account_data falhou — fallback sequencial")
+            logger.warning("AavePolygon: Multicall3 account_data falhou — fallback sequencial")
             eligible: list[tuple[str, float, float, float]] = []
             for b in candidates:
                 d = self._check_health(b)
@@ -728,25 +751,22 @@ class AaveLiquidatorBot:
                     if _DEBT_MIN_USD <= debt <= _DEBT_MAX_USD]
 
         if not eligible:
-            logger.debug("AaveLiquidator: 0 posições elegíveis (%d candidatos)", len(candidates))
+            logger.debug("AavePolygon: 0 posições elegíveis (%d candidatos)", len(candidates))
             return []
 
         # Fase 2: getUserReserveData dos elegíveis × reserves → 1-2 Multicall3
         reserves     = self._reserves_list()
         reserve_data = self._batch_reserve_data([b for b, *_ in eligible], reserves)
 
-        # Nonce sequencial: 1 fetch por tick, incrementa só quando TX é aceite
-        _pk    = get_env("BSC_PRIVATE_KEY") or ""
-        _acct  = self.w3.eth.account.from_key(_pk)
-        _nonce = self.w3.eth.get_transaction_count(_acct.address, 'pending')
-
-        # Saldo mínimo: suspende execução se ETH insuficiente para gas
+        # Saldo mínimo: suspende execução se POL insuficiente para gas
         if not self.dry_run:
-            _bal_wei = self.w3.eth.get_balance(_acct.address)
-            if _bal_wei < Web3.to_wei(0.005, 'ether'):
+            _pk_chk   = get_env("BSC_PRIVATE_KEY") or ""
+            _acct_chk = self.w3.eth.account.from_key(_pk_chk)
+            _bal_pol  = self.w3.eth.get_balance(_acct_chk.address)
+            if _bal_pol < Web3.to_wei(0.3, 'ether'):
                 logger.error(
-                    "AaveLiquidator: saldo insuficiente (%.6f ETH < 0.005) — execução suspensa",
-                    float(Web3.from_wei(_bal_wei, 'ether')),
+                    "AavePolygon: saldo insuficiente (%.4f POL < 0.3) — execução suspensa",
+                    float(Web3.from_wei(_bal_pol, 'ether')),
                 )
                 return []
 
@@ -756,7 +776,7 @@ class AaveLiquidatorBot:
         _n_cooldown  = sum(1 for b, *_ in eligible if self._cooldown.get(b.lower(), 0) > _now_tick)
         _n_blacklist = len(self._blacklist)
         logger.info(
-            "Tick: %d elegíveis | %d liquidáveis (HF<1.0) | %d cooldown | %d blacklist",
+            "AavePolygon Tick: %d elegíveis | %d liquidáveis (HF<1.0) | %d cooldown | %d blacklist",
             len(eligible), _n_liq, _n_cooldown, _n_blacklist,
         )
 
@@ -768,12 +788,12 @@ class AaveLiquidatorBot:
             if _b_low in self._blacklist:
                 _bl_hf = self._blacklist[_b_low]
                 if abs(hf - _bl_hf) / max(_bl_hf, 0.001) < 0.05:
-                    logger.debug("Base: %s blacklisted (HF=%.4f base=%.4f) — saltado",
+                    logger.debug("AavePolygon: %s blacklisted (HF=%.4f base=%.4f) — saltado",
                                  borrower[:10] + "…", hf, _bl_hf)
                     continue
                 del self._blacklist[_b_low]
                 self._fail_counts.pop(_b_low, None)
-                logger.info("Base: %s saiu da blacklist (HF %.4f→%.4f)",
+                logger.info("AavePolygon: %s saiu da blacklist (HF %.4f→%.4f)",
                             borrower[:10] + "…", _bl_hf, hf)
 
             opp = self._estimate(borrower, hf, col_usd, debt_usd,
@@ -782,7 +802,7 @@ class AaveLiquidatorBot:
             _debt_sym = _TOKEN_SYMBOLS.get(opp.debt_asset.lower(), opp.debt_asset[-6:])
             _col_sym  = _TOKEN_SYMBOLS.get(opp.collateral_asset.lower(), opp.collateral_asset[-6:])
             logger.info(
-                "LIQUIDAÇÃO %s HF=%.4f debt=$%.2f(%s) col=$%.2f(%s) lucro≈$%.4f dry=%s",
+                "AavePolygon: LIQUIDAÇÃO %s HF=%.4f debt=$%.2f(%s) col=$%.2f(%s) lucro≈$%.4f dry=%s",
                 borrower[:10] + "…", hf,
                 debt_usd, _debt_sym,
                 col_usd, _col_sym,
@@ -795,44 +815,43 @@ class AaveLiquidatorBot:
                 _until = self._cooldown.get(_b_low, 0)
                 if _until > _now:
                     logger.debug(
-                        "Base: %s em cooldown (%.0fs restantes) — saltado",
+                        "AavePolygon: %s em cooldown (%.0fs restantes) — saltado",
                         borrower[:10] + "…", _until - _now,
                     )
                 else:
-                    tx_hash = self._execute_live(opp, nonce=_nonce)
+                    tx_hash = self._execute_live(opp)
                     if tx_hash is None:
                         _cnt = self._fail_counts.get(_b_low, 0) + 1
                         self._fail_counts[_b_low] = _cnt
                         if _cnt >= _BLACKLIST_FAILS:
                             self._blacklist[_b_low] = hf
                             logger.warning(
-                                "Base: %s adicionado à blacklist (%d falhas consecutivas)",
+                                "AavePolygon: %s adicionado à blacklist (%d falhas consecutivas)",
                                 borrower[:10] + "…", _cnt,
                             )
                     else:
                         self._fail_counts.pop(_b_low, None)
                 executed = tx_hash is not None
                 if executed:
-                    _nonce += 1
                     self.notifier.notify(
                         "trade_executed",
-                        f"🔴 LIQUIDAÇÃO executada {borrower[:10]}… "
+                        f"🟣 LIQUIDAÇÃO Polygon executada {borrower[:10]}… "
                         f"lucro≈${opp.net_profit_usd:.2f} | tx={tx_hash[:20]}…",
                     )
 
             self._record(opp, executed=executed, tx_hash=tx_hash)
 
             results.append({
-                "borrower":    borrower,
-                "hf":          opp.health_factor,
-                "debt_usd":    opp.total_debt_usd,
-                "profit_usd":  opp.net_profit_usd,
-                "executed":    executed,
-                "dry_run":     self.dry_run,
+                "borrower":   borrower,
+                "hf":         opp.health_factor,
+                "debt_usd":   opp.total_debt_usd,
+                "profit_usd": opp.net_profit_usd,
+                "executed":   executed,
+                "dry_run":    self.dry_run,
             })
 
         if results:
-            logger.info("AaveLiquidator: %d oportunidades (%d candidatos)", len(results), len(candidates))
+            logger.info("AavePolygon: %d oportunidades (%d candidatos)", len(results), len(candidates))
         return results
 
 
@@ -848,48 +867,41 @@ if __name__ == "__main__":
     )
 
     print("=" * 60)
-    print("AAVE V3 BASE LIQUIDATOR — Smoke Test")
+    print("AAVE V3 POLYGON LIQUIDATOR — Smoke Test")
     print("=" * 60)
 
-    bot = AaveLiquidatorBot()
+    bot = AaveLiquidatorPolygonBot()
 
-    # 1. Conectividade
     connected = bot._connected()
-    print(f"\n[1] RPC Base conectado: {connected}")
+    print(f"\n[1] RPC Polygon conectado: {connected}")
     if not connected:
-        print("    AVISO: sem conectividade — inicializar ALCHEMY_BASE_URL no .env")
-        print("    Exemplo: ALCHEMY_BASE_URL=https://base-mainnet.g.alchemy.com/v2/<KEY>")
+        print("    AVISO: sem conectividade — verificar ALCHEMY_POLYGON_URL no .env")
         sys.exit(0)
 
-    # 2. Bloco actual
     try:
         bloco = bot.w3.eth.block_number
-        print(f"[2] Bloco actual Base: {bloco:,}")
+        print(f"[2] Bloco actual Polygon: {bloco:,}")
     except Exception as exc:
         print(f"[2] Bloco: ERRO — {exc}")
         sys.exit(1)
 
-    # 3. Reserves Aave V3 Base
     reserves = bot._reserves_list()
-    print(f"[3] Reserves Aave V3 Base: {len(reserves)} activos")
+    print(f"[3] Reserves Aave V3 Polygon: {len(reserves)} activos")
     for r in reserves[:5]:
         print(f"    {r}")
     if len(reserves) > 5:
         print(f"    … (+{len(reserves) - 5} mais)")
 
-    # 4. Preço ETH via oracle
-    eth_px = bot._eth_price()
-    print(f"[4] ETH price (oracle Aave): ${eth_px:,.2f}")
+    matic_px = bot._matic_price()
+    print(f"[4] MATIC price (oracle Aave): ${matic_px:,.4f}")
 
-    # 5. Scan mutuários (últimos 500 blocos — rápido)
     orig = bot.scan_blocks
     bot.scan_blocks = 500
-    print(f"\n[5] A procurar mutuários nos últimos 500 blocos…")
+    print("\n[5] A procurar mutuários nos últimos 500 blocos…")
     bot._scan_borrowers()
     print(f"    Mutuários encontrados: {len(bot._borrowers)}")
     bot.scan_blocks = orig
 
-    # 6. Verificar posições liquidáveis
     print(f"\n[6] A verificar health factors (threshold={bot.hf_threshold})…")
     found = 0
     for addr in list(bot._borrowers)[:20]:
@@ -907,7 +919,6 @@ if __name__ == "__main__":
 
     print(f"\n    Total liquidáveis: {found} (dry_run={bot.dry_run})")
 
-    # 7. Test DB
     from utils.database import get_session
     from sqlalchemy import text
     with get_session() as s:
