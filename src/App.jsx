@@ -56,7 +56,7 @@ function LiveClock() {
 }
 
 // ─── OVERVIEW ─────────────────────────────────────────────────────────────────
-function OverviewTab({ pnl, ibkr, sniper, grid, flashArb, system, liquidationsAll, errors }) {
+function OverviewTab({ pnl, ibkr, sniper, grid, flashArb, system, liquidationsAll, gas, errors }) {
   if (!pnl) return <Loader />;
 
   // ─ P&L ─
@@ -84,6 +84,8 @@ function OverviewTab({ pnl, ibkr, sniper, grid, flashArb, system, liquidationsAl
     'morpho_base','morpho_polygon','morpho_arb'];
   const liqTotalProfit = LIQ_IDS.reduce((s, id) =>
     s + (Number(liquidationsAll?.[id]?.summary?.total_est_profit) || 0), 0);
+  const liqExecutedProfit = LIQ_IDS.reduce((s, id) =>
+    s + (Number(liquidationsAll?.[id]?.summary?.executed_profit) || 0), 0);
   const liqBestOpp = LIQ_IDS.reduce((best, id) => {
     const v = Number(liquidationsAll?.[id]?.summary?.best_profit) || 0;
     return v > best ? v : best;
@@ -92,6 +94,35 @@ function OverviewTab({ pnl, ibkr, sniper, grid, flashArb, system, liquidationsAl
     cnt + (liquidationsAll?.[id]?.opportunities ?? []).filter(o => o.health_factor >= 1.0 && o.health_factor < 1.2).length, 0);
   const liqLiquidable = LIQ_IDS.reduce((cnt, id) =>
     cnt + (liquidationsAll?.[id]?.opportunities ?? []).filter(o => o.health_factor < 1.0).length, 0);
+
+  // ─ Gas per chain ─
+  const GAS_CHAINS = [
+    { id: 'base',    label: 'BASE',      symbol: 'ETH',  warn: 0.005 },
+    { id: 'arb',     label: 'ARBITRUM',  symbol: 'ETH',  warn: 0.003 },
+    { id: 'op',      label: 'OPTIMISM',  symbol: 'ETH',  warn: 0.003 },
+    { id: 'scroll',  label: 'SCROLL',    symbol: 'ETH',  warn: 0.002 },
+    { id: 'linea',   label: 'LINEA',     symbol: 'ETH',  warn: 0.002 },
+    { id: 'polygon', label: 'POLYGON',   symbol: 'POL',  warn: 10    },
+    { id: 'avax',    label: 'AVALANCHE', symbol: 'AVAX', warn: 0.05  },
+  ];
+
+  // ─ Real profit per bot ─
+  const PROFIT_BOTS = [
+    { id: 'base',             label: 'AAVE BASE'     },
+    { id: 'polygon',          label: 'AAVE POLYGON'  },
+    { id: 'avax',             label: 'AAVE AVAX'     },
+    { id: 'arb',              label: 'AAVE ARB'      },
+    { id: 'op',               label: 'AAVE OP'       },
+    { id: 'scroll',           label: 'AAVE SCROLL'   },
+    { id: 'linea',            label: 'AAVE LINEA'    },
+    { id: 'compound_base',    label: 'CMPD BASE'     },
+    { id: 'compound_polygon', label: 'CMPD POLYGON'  },
+    { id: 'compound_arb',     label: 'CMPD ARB'      },
+    { id: 'compound_op',      label: 'CMPD OP'       },
+    { id: 'morpho_base',      label: 'MORPHO BASE'   },
+    { id: 'morpho_polygon',   label: 'MORPHO POLYGON'},
+    { id: 'morpho_arb',       label: 'MORPHO ARB'    },
+  ];
 
   // ─ Bot status ─
   const serviceList = system
@@ -216,8 +247,12 @@ function OverviewTab({ pnl, ibkr, sniper, grid, flashArb, system, liquidationsAl
               </div>
             )}
             <div className="kv">
-              <span className="kv-k">LIQUIDAÇÕES</span>
+              <span className="kv-k">LIQ. ESTIMADO</span>
               <span className={clr(liqTotalProfit)}>{fmtUSD(liqTotalProfit)}</span>
+            </div>
+            <div className="kv">
+              <span className="kv-k">LIQ. REAL</span>
+              <span className={clr(liqExecutedProfit)}>{fmtUSD(liqExecutedProfit)}</span>
             </div>
             <div className="kv" style={{ borderTop: '1px solid #222', paddingTop: 8, marginTop: 2 }}>
               <span className="kv-k">WIN RATE</span>
@@ -243,6 +278,53 @@ function OverviewTab({ pnl, ibkr, sniper, grid, flashArb, system, liquidationsAl
                 <span>${fmt(ibkr.regime.spy)}</span>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Gas por chain + Lucro real ─────────────────────────────────────── */}
+      <div className="row2 mb">
+        <div className="panel">
+          <div className="panel-head"><Zap size={11} />&nbsp;GAS POR CHAIN</div>
+          {!gas ? (
+            <div className="empty">A carregar…</div>
+          ) : (
+            <div className="kv-list">
+              {GAS_CHAINS.map(({ id, label, symbol, warn }) => {
+                const b = gas[id];
+                const bal = b?.balance;
+                const isLow = bal != null && bal < warn;
+                const isNull = bal == null;
+                return (
+                  <div key={id} className="kv">
+                    <span className="kv-k">{label}</span>
+                    <span style={{ color: isNull ? '#555' : isLow ? 'var(--yellow)' : 'var(--green)' }}>
+                      {isNull ? '—' : `${bal.toFixed(4)} ${symbol}`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-head"><DollarSign size={11} />&nbsp;LUCRO REAL POR BOT</div>
+          <div className="kv-list">
+            {PROFIT_BOTS.map(({ id, label }) => {
+              const prof = Number(liquidationsAll?.[id]?.summary?.executed_profit) || 0;
+              if (prof <= 0) return null;
+              return (
+                <div key={id} className="kv">
+                  <span className="kv-k">{label}</span>
+                  <span className="pos">{fmtUSD(prof)}</span>
+                </div>
+              );
+            })}
+            <div className="kv" style={{ borderTop: '1px solid #222', paddingTop: 8, marginTop: 2 }}>
+              <span className="kv-k">TOTAL EXECUTADO</span>
+              <span className={clr(liqExecutedProfit)}>{fmtUSD(liqExecutedProfit)}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1470,11 +1552,12 @@ export default function App() {
   const [liquidationsCompoundOp,      setLiquidationsCompoundOp]      = useState(null);
   const [liquidationsMorphoPolygon,   setLiquidationsMorphoPolygon]   = useState(null);
   const [liquidationsMorphoArb,       setLiquidationsMorphoArb]       = useState(null);
+  const [gas,                         setGas]                         = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR, liquidationsMorphoBaseR, liquidationsCompoundPolygonR, liquidationsCompoundArbR, liquidationsCompoundOpR, liquidationsMorphoPolygonR, liquidationsMorphoArbR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR, liquidationsMorphoBaseR, liquidationsCompoundPolygonR, liquidationsCompoundArbR, liquidationsCompoundOpR, liquidationsMorphoPolygonR, liquidationsMorphoArbR, gasR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
@@ -1496,6 +1579,7 @@ export default function App() {
       apiFetch('/api/liquidations/compound_op'),
       apiFetch('/api/liquidations/morpho_polygon'),
       apiFetch('/api/liquidations/morpho_arb'),
+      apiFetch('/api/gas'),
     ]);
     if (pnlR.status                === 'fulfilled') setPnl(pnlR.value);                           else errs.pnl          = pnlR.reason?.message;
     if (ibkrR.status               === 'fulfilled') setIbkr(ibkrR.value);                         else errs.ibkr         = ibkrR.reason?.message;
@@ -1518,6 +1602,7 @@ export default function App() {
     if (liquidationsCompoundOpR.status      === 'fulfilled') setLiquidationsCompoundOp(liquidationsCompoundOpR.value);
     if (liquidationsMorphoPolygonR.status   === 'fulfilled') setLiquidationsMorphoPolygon(liquidationsMorphoPolygonR.value);
     if (liquidationsMorphoArbR.status       === 'fulfilled') setLiquidationsMorphoArb(liquidationsMorphoArbR.value);
+    if (gasR.status                         === 'fulfilled') setGas(gasR.value);
     setErrors(errs);
     setOnline(Object.keys(errs).length < 7);
     setLoading(false);
@@ -1598,7 +1683,7 @@ export default function App() {
       </nav>
 
       <main className="content" key={activeTab}>
-        {activeTab === 'overview'  && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} flashArb={flashArb} system={system} liquidationsAll={{ base: liquidations, polygon: liquidationsPolygon, avax: liquidationsAvax, arb: liquidationsArb, op: liquidationsOp, scroll: liquidationsScroll, linea: liquidationsLinea, compound_base: liquidationsCompoundBase, compound_polygon: liquidationsCompoundPolygon, compound_arb: liquidationsCompoundArb, compound_op: liquidationsCompoundOp, morpho_base: liquidationsMorphoBase, morpho_polygon: liquidationsMorphoPolygon, morpho_arb: liquidationsMorphoArb }} errors={errors} />}
+        {activeTab === 'overview'  && <OverviewTab pnl={pnl} ibkr={ibkr} sniper={sniper} grid={grid} flashArb={flashArb} system={system} liquidationsAll={{ base: liquidations, polygon: liquidationsPolygon, avax: liquidationsAvax, arb: liquidationsArb, op: liquidationsOp, scroll: liquidationsScroll, linea: liquidationsLinea, compound_base: liquidationsCompoundBase, compound_polygon: liquidationsCompoundPolygon, compound_arb: liquidationsCompoundArb, compound_op: liquidationsCompoundOp, morpho_base: liquidationsMorphoBase, morpho_polygon: liquidationsMorphoPolygon, morpho_arb: liquidationsMorphoArb }} gas={gas} errors={errors} />}
         {activeTab === 'ibkr'     && (errors.ibkr    ? <Err msg={errors.ibkr}    /> : <IBKRTab    data={ibkr}    />)}
         {activeTab === 'sniper'   && (errors.sniper  ? <Err msg={errors.sniper}  /> : <SniperTab  data={sniper}  />)}
         {activeTab === 'grid'     && (errors.grid    ? <Err msg={errors.grid}    /> : <GridTab    data={grid}    />)}
