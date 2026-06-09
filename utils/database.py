@@ -68,6 +68,7 @@ class LiquidationOpportunity(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow, index=True)
     position_address: Mapped[str] = mapped_column(String(42), index=True)
+    chain: Mapped[str] = mapped_column(String(16), default="base")
     health_factor: Mapped[float] = mapped_column(Float)
     debt_asset: Mapped[str] = mapped_column(String(42))
     debt_amount_usd: Mapped[float] = mapped_column(Float)
@@ -134,31 +135,56 @@ def init_db() -> None:
     """Cria as tabelas se ainda não existirem e aplica migrações idempotentes."""
     Base.metadata.create_all(get_engine())
     logger.info("Tabelas garantidas: %s", ", ".join(Base.metadata.tables))
+    migrate_add_chain_column()
     migrate_liq_dedup()
 
 
-def migrate_liq_dedup() -> None:
-    """Remove duplicados diários e cria índice único (position_address, date(ts)).
+def migrate_add_chain_column() -> None:
+    """Adiciona coluna chain à tabela liquidation_opportunities (idempotente).
 
-    Idempotente — pode ser chamado várias vezes sem efeito secundário.
-    SQLite não suporta ALTER TABLE ADD UNIQUE; usamos CREATE UNIQUE INDEX com
-    expressão date(ts) que é suportada desde SQLite 3.9+.
+    Atribui 'base' a todos os registos sem chain e actualiza o índice único
+    para incluir chain — necessário para suportar Base e Polygon em paralelo.
     """
     engine = get_engine()
     with engine.connect() as conn:
-        # 1. Limpar duplicados mantendo o registo mais antigo (MIN id) por dia
+        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(liquidation_opportunities)"))]
+        if "chain" not in cols:
+            try:
+                conn.execute(text(
+                    "ALTER TABLE liquidation_opportunities ADD COLUMN chain VARCHAR(16) NOT NULL DEFAULT 'base'"
+                ))
+                conn.commit()
+                logger.info("migrate_add_chain_column: coluna chain adicionada (default='base')")
+            except Exception:
+                conn.rollback()  # outro thread já adicionou a coluna em paralelo — ignorar
+        # Substituir índice antigo (sem chain) pelo novo (com chain)
+        conn.execute(text("DROP INDEX IF EXISTS ux_liq_opp_addr_day"))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_liq_opp_addr_day_chain
+            ON liquidation_opportunities(position_address, date(ts), chain)
+        """))
+        conn.commit()
+    logger.info("migrate_add_chain_column: índice ux_liq_opp_addr_day_chain garantido")
+
+
+def migrate_liq_dedup() -> None:
+    """Remove duplicados diários por (position_address, date(ts), chain).
+
+    Idempotente — pode ser chamado várias vezes sem efeito secundário.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
         conn.execute(text("""
             DELETE FROM liquidation_opportunities
             WHERE id NOT IN (
                 SELECT MIN(id)
                 FROM liquidation_opportunities
-                GROUP BY position_address, date(ts)
+                GROUP BY position_address, date(ts), chain
             )
         """))
-        # 2. Índice único por endereço + dia (expressão — um registo por endereço por dia)
         conn.execute(text("""
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_liq_opp_addr_day
-            ON liquidation_opportunities(position_address, date(ts))
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_liq_opp_addr_day_chain
+            ON liquidation_opportunities(position_address, date(ts), chain)
         """))
         conn.commit()
     logger.info("migrate_liq_dedup: duplicados removidos, índice único garantido")
@@ -197,11 +223,12 @@ def upsert_liquidation_opportunity(
     tx_hash: str | None = None,
     dry_run: bool = True,
     status: str = "found",
+    chain: str = "base",
 ) -> tuple[int, bool]:
-    """INSERT se não existe registo hoje para o endereço; UPDATE caso contrário.
+    """INSERT se não existe registo hoje para o endereço+chain; UPDATE caso contrário.
 
     Devolve (id, inserted) — inserted=True em INSERT, False em UPDATE.
-    Garante um único registo por (position_address, dia UTC).
+    Garante um único registo por (position_address, dia UTC, chain).
     """
     today = _utcnow().date().isoformat()
     addr  = position_address.lower()
@@ -212,6 +239,7 @@ def upsert_liquidation_opportunity(
             .where(
                 LiquidationOpportunity.position_address == addr,
                 func.date(LiquidationOpportunity.ts) == today,
+                LiquidationOpportunity.chain == chain,
             )
             .limit(1)
         )
@@ -232,6 +260,7 @@ def upsert_liquidation_opportunity(
 
         opp = LiquidationOpportunity(
             position_address=addr,
+            chain=chain,
             health_factor=health_factor,
             debt_asset=debt_asset,
             debt_amount_usd=debt_amount_usd,

@@ -127,15 +127,16 @@ trading:
 # ------------------------------------------------------------------------------
 orchestrator:
   enabled_bots:
-    - "arbitrage"
-    - "grid"
-    - "pepe_grid"
-    - "dca"
-    - "funding_rate"
     - "solana_grid"
-    - "sniper"
-    - "solana_sniper"
     - "aave_liquidator"
+    - "aave_liquidator_polygon"
+    - "aave_liquidator_avax"
+    - "aave_liquidator_arb"
+    - "aave_liquidator_op"
+    - "aave_liquidator_scroll"
+    - "aave_liquidator_linea"
+    - "compound_liquidator_base"
+    - "morpho_liquidator_base"
 
 # ------------------------------------------------------------------------------
 # BOTS — parâmetros por estratégia
@@ -226,10 +227,80 @@ bots:
   aave_liquidator:
     poll_seconds: 30                  # intervalo de scan (s)
     health_factor_threshold: 1.2      # monitorizar posições com HF abaixo disto
-    min_profit_usd: 5.0               # só executar se lucro líquido > $5 (DRY_RUN ignora)
+    min_profit_usd: 8.0               # só executar se lucro líquido > $25 (DRY_RUN ignora)
     max_positions_per_tick: 50        # máx. posições a verificar por tick
-    borrower_scan_blocks: 50000       # janela de blocos para descobrir mutuários (~14h em Base)
+    borrower_scan_blocks: 5000        # janela de blocos para descobrir mutuários (~84min em Base)
     flash_loan_contract: "0x9531F6F28202B7E83717b31992035F769046135B"
+    chain_id: 8453                    # Base mainnet
+
+  aave_liquidator_polygon:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # monitorizar posições com HF abaixo disto
+    min_profit_usd: 5.0               # só executar se lucro líquido > $25 (DRY_RUN ignora)
+    max_positions_per_tick: 50        # máx. posições a verificar por tick
+    borrower_scan_blocks: 5000        # janela de blocos para descobrir mutuários (~2h em Polygon)
+    flash_loan_contract: ""           # preencher quando contrato for deployado na Polygon
+    chain_id: 137                     # Polygon mainnet
+
+  aave_liquidator_avax:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # monitorizar posições com HF abaixo disto
+    min_profit_usd: 10.0              # só executar se lucro líquido > $25 (DRY_RUN ignora)
+    max_positions_per_tick: 50        # máx. posições a verificar por tick
+    borrower_scan_blocks: 5000        # janela de blocos para descobrir mutuários (~2h em Avalanche)
+    flash_loan_contract: ""           # preencher quando contrato for deployado na Avalanche
+    chain_id: 43114                   # Avalanche C-Chain mainnet
+
+  aave_liquidator_arb:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # monitorizar posições com HF abaixo disto
+    min_profit_usd: 8.0               # só executar se lucro líquido > $25 (DRY_RUN ignora)
+    max_positions_per_tick: 50        # máx. posições a verificar por tick
+    borrower_scan_blocks: 5000        # janela de blocos para descobrir mutuários (~2h em Arbitrum)
+    flash_loan_contract: ""           # preencher quando contrato for deployado na Arbitrum
+    chain_id: 42161                   # Arbitrum One mainnet
+
+  aave_liquidator_op:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # monitorizar posições com HF abaixo disto
+    min_profit_usd: 8.0               # só executar se lucro líquido > $25 (DRY_RUN ignora)
+    max_positions_per_tick: 50        # máx. posições a verificar por tick
+    borrower_scan_blocks: 5000        # janela de blocos para descobrir mutuários (~2h em Optimism)
+    flash_loan_contract: ""           # preencher quando contrato for deployado na Optimism
+    chain_id: 10                      # Optimism mainnet
+
+  aave_liquidator_scroll:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # monitorizar posições com HF abaixo disto
+    min_profit_usd: 5.0               # só executar se lucro líquido > $25 (DRY_RUN ignora)
+    max_positions_per_tick: 50        # máx. posições a verificar por tick
+    borrower_scan_blocks: 2000000     # ~3 meses @ 3s/bloco; 1ª execução demora ~100s
+    flash_loan_contract: ""           # preencher quando contrato for deployado na Scroll
+    chain_id: 534352                  # Scroll mainnet
+
+  aave_liquidator_linea:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # monitorizar posições com HF abaixo disto
+    min_profit_usd: 5.0               # só executar se lucro líquido > $25 (DRY_RUN ignora)
+    max_positions_per_tick: 50        # máx. posições a verificar por tick
+    borrower_scan_blocks: 2000000     # ~1.5 meses @ 2s/bloco; 1ª execução demora ~100s
+    flash_loan_contract: ""           # preencher quando contrato for deployado na Linea
+    chain_id: 59144                   # Linea mainnet
+
+  compound_liquidator_base:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # vigiar posições com HF < 1.2
+    min_profit_usd: 8.0               # só executar absorb() se lucro líquido > $25
+    max_positions_per_tick: 50        # máx. posições a verificar por tick
+    borrower_scan_blocks: 200000      # ~5.5h @ 2s/bloco Base; 1ª execução ~100s
+    chain_id: 8453                    # Base mainnet
+
+  morpho_liquidator_base:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # vigiar posições com HF < 1.2 (< 1.0 = liquidável)
+    min_profit_usd: 8.0               # só executar liquidate() se lucro > $25
+    max_positions_per_tick: 100       # mais posições por tick (Morpho tem muita actividade)
+    borrower_scan_blocks: 200000      # ~5.5h @ 2s/bloco Base; ~286 borrows/3900 blocos
     chain_id: 8453                    # Base mainnet
 
 # ------------------------------------------------------------------------------

@@ -16,12 +16,21 @@ Flags:
 """
 from __future__ import annotations
 
+
 import signal
 import sys
 import threading
 import time
 
+from bots.aave_liquidator_arb_bot import AaveLiquidatorArbBot
+from bots.aave_liquidator_avax_bot import AaveLiquidatorAvaxBot
+from bots.aave_liquidator_linea_bot import AaveLiquidatorLineaBot
+from bots.aave_liquidator_op_bot import AaveLiquidatorOpBot
+from bots.compound_liquidator_base_bot import CompoundLiquidatorBaseBot
+from bots.morpho_liquidator_base_bot import MorphoLiquidatorBaseBot
+from bots.aave_liquidator_scroll_bot import AaveLiquidatorScrollBot
 from bots.aave_liquidator_bot import AaveLiquidatorBot
+from bots.aave_liquidator_polygon_bot import AaveLiquidatorPolygonBot
 from bots.arbitrage_bot import ArbitrageBot
 from bots.dca_bot import DCABot
 from bots.funding_rate_bot import FundingRateBot
@@ -56,6 +65,22 @@ BOT_REGISTRY = {
                       lambda s: int(s.get("bots", {}).get("solana_sniper", {}).get("poll_seconds", 15))),
     "aave_liquidator": (AaveLiquidatorBot, "tick",
                         lambda s: int(s.get("bots", {}).get("aave_liquidator", {}).get("poll_seconds", 30))),
+    "aave_liquidator_polygon": (AaveLiquidatorPolygonBot, "tick",
+                                lambda s: int(s.get("bots", {}).get("aave_liquidator_polygon", {}).get("poll_seconds", 30))),
+    "aave_liquidator_avax": (AaveLiquidatorAvaxBot, "tick",
+                             lambda s: int(s.get("bots", {}).get("aave_liquidator_avax", {}).get("poll_seconds", 30))),
+    "aave_liquidator_arb": (AaveLiquidatorArbBot, "tick",
+                            lambda s: int(s.get("bots", {}).get("aave_liquidator_arb", {}).get("poll_seconds", 30))),
+    "aave_liquidator_op": (AaveLiquidatorOpBot, "tick",
+                           lambda s: int(s.get("bots", {}).get("aave_liquidator_op", {}).get("poll_seconds", 30))),
+    "aave_liquidator_scroll": (AaveLiquidatorScrollBot, "tick",
+                               lambda s: int(s.get("bots", {}).get("aave_liquidator_scroll", {}).get("poll_seconds", 30))),
+    "aave_liquidator_linea": (AaveLiquidatorLineaBot, "tick",
+                              lambda s: int(s.get("bots", {}).get("aave_liquidator_linea", {}).get("poll_seconds", 30))),
+    "compound_liquidator_base": (CompoundLiquidatorBaseBot, "tick",
+                                 lambda s: int(s.get("bots", {}).get("compound_liquidator_base", {}).get("poll_seconds", 30))),
+    "morpho_liquidator_base": (MorphoLiquidatorBaseBot, "tick",
+                               lambda s: int(s.get("bots", {}).get("morpho_liquidator_base", {}).get("poll_seconds", 30))),
 }
 
 
@@ -97,20 +122,30 @@ class Orchestrator:
     def _bot_loop(self, name: str) -> None:
         factory, step_name, interval_fn = BOT_REGISTRY[name]
         interval = interval_fn(self.settings)
-        try:
-            bot = self._instance(name)
-        except Exception:  # noqa: BLE001 - falha de arranque não derruba os outros
-            logger.exception("Falha ao inicializar '%s' — bot não arranca.", name)
-            return
-        step = getattr(bot, step_name)
-        logger.info("Bot '%s' a correr (passo=%s, intervalo=%ss).", name, step_name, interval)
+        _RESTART_DELAY = 5  # segundos de espera antes de reiniciar o bot
+
         while not self.stop_event.is_set():
+            # Cria instância fresca a cada (re)arranque
             try:
-                step()
-            except Exception:  # noqa: BLE001 - isola falhas por iteração
-                logger.exception("Erro na iteração do bot '%s'.", name)
-            # espera interrompível: acorda imediatamente no shutdown
-            self.stop_event.wait(interval)
+                logger.info("A inicializar bot '%s'...", name)
+                bot = factory(self.settings)
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao inicializar '%s' — a reiniciar em %ds.", name, _RESTART_DELAY)
+                self.stop_event.wait(_RESTART_DELAY)
+                continue
+
+            step = getattr(bot, step_name)
+            logger.info("Bot '%s' a correr (passo=%s, intervalo=%ss).", name, step_name, interval)
+
+            while not self.stop_event.is_set():
+                try:
+                    step()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Crash no bot '%s' — a reiniciar em %ds.", name, _RESTART_DELAY)
+                    self.stop_event.wait(_RESTART_DELAY)
+                    break  # quebra o loop interno → loop externo reinicia o bot
+                self.stop_event.wait(interval)
+
         logger.info("Bot '%s' terminado.", name)
 
     # ------------------------------------------------------------- controlo
