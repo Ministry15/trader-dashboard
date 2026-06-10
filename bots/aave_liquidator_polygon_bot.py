@@ -21,6 +21,7 @@ RPC: ALCHEMY_POLYGON_URL do .env (fallback: https://polygon-rpc.com)
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import requests
@@ -28,6 +29,7 @@ from web3 import Web3
 from web3.exceptions import ContractLogicError
 
 from utils.config import get_env, get_settings
+from utils.wallet_pool import WalletPool
 from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
 from utils.logger import get_logger
@@ -296,6 +298,7 @@ class AaveLiquidatorPolygonBot:
         self._blacklist        : dict[str, float] = {}
 
         self.notifier = TelegramNotifier(self.settings)
+        self._wallet_pool = WalletPool()
         init_db()
 
         if not flash_addr:
@@ -668,7 +671,7 @@ class AaveLiquidatorPolygonBot:
         logger.debug("AavePolygon: BD %s id=%d %s HF=%.4f",
                      action, rec_id, opp.borrower[:10], opp.health_factor)
 
-    def _execute_live(self, opp: LiqOpportunityPolygon) -> str | None:
+    def _execute_live(self, opp: LiqOpportunityPolygon, *, pk: str | None = None) -> str | None:
         """Executa flash loan liquidation via contrato deployado."""
         if self.flash is None:
             logger.error(
@@ -676,7 +679,7 @@ class AaveLiquidatorPolygonBot:
             )
             return None
         try:
-            pk   = get_env("BSC_PRIVATE_KEY") or ""
+            pk   = pk or get_env("BSC_PRIVATE_KEY") or ""
             acct = self.w3.eth.account.from_key(pk)
             debt_oracle = self._get_asset_price(opp.debt_asset)
             token_dec   = self._token_decimals(opp.debt_asset)
@@ -795,9 +798,9 @@ class AaveLiquidatorPolygonBot:
         reserves     = self._reserves_list()
         reserve_data = self._batch_reserve_data([b for b, *_ in eligible], reserves)
 
-        # Saldo mínimo: suspende execução se POL insuficiente para gas
+        # Saldo mínimo: suspende execução se POL insuficiente para gas (verifica carteira primária)
         if not self.dry_run:
-            _pk_chk   = get_env("BSC_PRIVATE_KEY") or ""
+            _pk_chk   = self._wallet_pool.primary_pk or get_env("BSC_PRIVATE_KEY") or ""
             _acct_chk = self.w3.eth.account.from_key(_pk_chk)
             _bal_pol  = self.w3.eth.get_balance(_acct_chk.address)
             if _bal_pol < Web3.to_wei(0.3, 'ether'):
@@ -817,11 +820,12 @@ class AaveLiquidatorPolygonBot:
             len(eligible), _n_liq, _n_cooldown, _n_blacklist,
         )
 
-        results: list[dict] = []
+        # ── Fase 1: estimar todas as oportunidades ────────────────────────────
+        _now_exec = time.time()
+        opp_list: list[tuple] = []  # (opp, _b_low, should_execute)
         for borrower, hf, col_usd, debt_usd in eligible:
             _b_low = borrower.lower()
 
-            # Blacklist permanente: salta se HF não mudou > 5%
             if _b_low in self._blacklist:
                 _bl_hf = self._blacklist[_b_low]
                 if abs(hf - _bl_hf) / max(_bl_hf, 0.001) < 0.05:
@@ -841,45 +845,68 @@ class AaveLiquidatorPolygonBot:
             logger.info(
                 "AavePolygon: LIQUIDAÇÃO %s HF=%.4f debt=$%.2f(%s) col=$%.2f(%s) lucro≈$%.4f dry=%s",
                 borrower[:10] + "…", hf,
-                debt_usd, _debt_sym,
-                col_usd, _col_sym,
+                debt_usd, _debt_sym, col_usd, _col_sym,
                 opp.net_profit_usd, self.dry_run,
             )
 
-            tx_hash, executed = None, False
-            if not self.dry_run and hf < _HF_LIQUIDATABLE and opp.net_profit_usd >= self.min_profit:
-                _now   = time.time()
-                _until = self._cooldown.get(_b_low, 0)
-                if _until > _now:
-                    logger.debug(
-                        "AavePolygon: %s em cooldown (%.0fs restantes) — saltado",
-                        borrower[:10] + "…", _until - _now,
-                    )
-                else:
-                    tx_hash = self._execute_live(opp)
-                    if tx_hash is None:
-                        _cnt = self._fail_counts.get(_b_low, 0) + 1
-                        self._fail_counts[_b_low] = _cnt
-                        if _cnt >= _BLACKLIST_FAILS:
-                            self._blacklist[_b_low] = hf
-                            logger.warning(
-                                "AavePolygon: %s adicionado à blacklist (%d falhas consecutivas)",
-                                borrower[:10] + "…", _cnt,
-                            )
-                    else:
-                        self._fail_counts.pop(_b_low, None)
-                executed = tx_hash is not None
-                if executed:
+            should_exec = (
+                not self.dry_run
+                and hf < _HF_LIQUIDATABLE
+                and opp.net_profit_usd >= self.min_profit
+                and self._cooldown.get(_b_low, 0) <= _now_exec
+            )
+            if not should_exec and not self.dry_run and self._cooldown.get(_b_low, 0) > _now_exec:
+                logger.debug("AavePolygon: %s em cooldown (%.0fs) — saltado",
+                             borrower[:10] + "…", self._cooldown[_b_low] - _now_exec)
+            opp_list.append((opp, _b_low, should_exec))
+
+        # ── Fase 2: execução paralela por wallet pool ─────────────────────────
+        tx_map: dict[str, str | None] = {}
+        to_exec = sorted(
+            [(opp, bl) for opp, bl, se in opp_list if se],
+            key=lambda x: -x[0].net_profit_usd,
+        )
+        if to_exec:
+            logger.info("AavePolygon: %d liquidações prontas → %d wallet(s) disponíveis",
+                        len(to_exec), self._wallet_pool.size)
+
+            def _exec_task(pair):
+                opp, bl = pair
+                try:
+                    with self._wallet_pool.borrow(timeout=1.5) as _pk:
+                        return bl, self._execute_live(opp, pk=_pk)
+                except Exception as _e:
+                    logger.warning("AavePolygon: wallet indisponível para %s: %s",
+                                   bl[:10] + "…", _e)
+                    return bl, None
+
+            with ThreadPoolExecutor(max_workers=self._wallet_pool.size) as _ex:
+                for _bl, _tx in _ex.map(_exec_task, to_exec):
+                    tx_map[_bl] = _tx
+
+        # ── Fase 3: resultados + state update ────────────────────────────────
+        results: list[dict] = []
+        for opp, _b_low, should_exec in opp_list:
+            tx_hash = tx_map.get(_b_low) if should_exec else None
+            executed = tx_hash is not None
+            if should_exec:
+                if tx_hash:
+                    self._fail_counts.pop(_b_low, None)
                     self.notifier.notify(
                         "trade_executed",
-                        f"🟣 LIQUIDAÇÃO Polygon executada {borrower[:10]}… "
+                        f"🟣 LIQUIDAÇÃO Polygon executada {opp.borrower[:10]}… "
                         f"lucro≈${opp.net_profit_usd:.2f} | tx={tx_hash[:20]}…",
                     )
-
+                else:
+                    _cnt = self._fail_counts.get(_b_low, 0) + 1
+                    self._fail_counts[_b_low] = _cnt
+                    if _cnt >= _BLACKLIST_FAILS:
+                        self._blacklist[_b_low] = opp.health_factor
+                        logger.warning("AavePolygon: %s adicionado à blacklist (%d falhas)",
+                                       opp.borrower[:10] + "…", _cnt)
             self._record(opp, executed=executed, tx_hash=tx_hash)
-
             results.append({
-                "borrower":   borrower,
+                "borrower":   opp.borrower,
                 "hf":         opp.health_factor,
                 "debt_usd":   opp.total_debt_usd,
                 "profit_usd": opp.net_profit_usd,

@@ -25,6 +25,7 @@ import queue
 import threading
 import time
 import websockets
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import requests
@@ -36,6 +37,7 @@ from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
+from utils.wallet_pool import WalletPool
 
 logger = get_logger(__name__)
 
@@ -250,6 +252,7 @@ class CompoundLiquidatorPolygonBot:
         self._ws_thread.start()
 
         self.notifier = TelegramNotifier(self.settings)
+        self._wallet_pool = WalletPool()
         init_db()
 
         logger.info(
@@ -526,11 +529,13 @@ class CompoundLiquidatorPolygonBot:
             opp.health_factor, opp.is_liquidatable,
         )
 
-    def _execute_live(self, opp: LiqOpportunityCompoundPolygon, nonce: int) -> str | None:
+    def _execute_live(self, opp: LiqOpportunityCompoundPolygon, nonce: int | None = None, *, pk: str | None = None) -> str | None:
         _cd_key = f"{opp.comet_key}:{opp.borrower.lower()}"
         try:
-            pk       = get_env("BSC_PRIVATE_KEY") or ""
+            pk       = pk or get_env("BSC_PRIVATE_KEY") or ""
             acct     = self.w3.eth.account.from_key(pk)
+            if nonce is None:
+                nonce = self.w3.eth.get_transaction_count(acct.address, 'pending')
             contract = self._contracts[opp.comet_key]
             try:
                 contract.functions.absorb(
@@ -648,16 +653,11 @@ class CompoundLiquidatorPolygonBot:
         _now_ck = time.time()
         self._cooldown = {k: v for k, v in self._cooldown.items() if v > _now_ck}
 
-        _pk    = get_env("BSC_PRIVATE_KEY") or ""
-        _acct  = self.w3.eth.account.from_key(_pk)
-        try:
-            _nonce = self.w3.eth.get_transaction_count(_acct.address, 'pending')
-        except Exception as exc:
-            logger.warning("CompoundPolygon: get_nonce falhou — tick saltado: %s", exc)
-            return []
         if not self.dry_run:
+            _pk_chk  = self._wallet_pool.primary_pk or get_env("BSC_PRIVATE_KEY") or ""
+            _acct_chk = self.w3.eth.account.from_key(_pk_chk)
             try:
-                _bal_wei = self.w3.eth.get_balance(_acct.address)
+                _bal_wei = self.w3.eth.get_balance(_acct_chk.address)
             except Exception as exc:
                 logger.warning("CompoundPolygon: get_balance falhou — tick saltado: %s", exc)
                 return []
@@ -681,6 +681,8 @@ class CompoundLiquidatorPolygonBot:
             logger.info("CompoundPolygon[%s] Tick: %d borrowers | %d blacklist",
                         comet_key, len(self._borrowers[comet_key]), len(self._blacklist))
 
+            # ── Fase 1: verificar posições, recolher liquidáveis ──────────────
+            opp_list: list[tuple] = []  # (opp, _cd_key, is_liq, should_exec)
             liq_count = watch_count = 0
 
             for borrower in list(self._borrowers[comet_key])[:self.max_per_tick]:
@@ -701,7 +703,6 @@ class CompoundLiquidatorPolygonBot:
                     logger.info("CompoundPolygon[%s]: %s saiu da blacklist",
                                 comet_key, borrower[:10] + "…")
 
-                tx_hash = None
                 if opp.is_liquidatable:
                     liq_count += 1
                     logger.info(
@@ -711,45 +712,74 @@ class CompoundLiquidatorPolygonBot:
                         opp.total_debt_usd, opp.total_collateral_usd,
                         opp.estimated_profit_usd, self.dry_run,
                     )
-                    if not self.dry_run and opp.estimated_profit_usd >= self.min_profit:
-                        _until = self._cooldown.get(_cd_key, 0)
-                        if _until > _now_tick:
-                            logger.debug("CompoundPolygon[%s]: %s em cooldown (%.0fs)",
-                                         comet_key, borrower[:10] + "…", _until - _now_tick)
-                        else:
-                            tx_hash = self._execute_live(opp, nonce=_nonce)
-                            if tx_hash is None:
-                                _cnt = self._fail_counts.get(_cd_key, 0) + 1
-                                self._fail_counts[_cd_key] = _cnt
-                                if _cnt >= _BLACKLIST_FAILS:
-                                    self._blacklist[_cd_key] = opp.health_factor
-                                    logger.warning(
-                                        "CompoundPolygon[%s]: %s adicionado à blacklist (%d falhas)",
-                                        comet_key, borrower[:10] + "…", _cnt,
-                                    )
-                            else:
-                                self._fail_counts.pop(_cd_key, None)
-                                _nonce += 1
-                                self.notifier.notify(
-                                    "trade_executed",
-                                    f"🟢 Compound Polygon[{comet_key}] ABSORB "
-                                    f"{borrower[:10]}… "
-                                    f"lucro≈${opp.estimated_profit_usd:.2f} "
-                                    f"| tx={tx_hash[:20]}…",
-                                )
+                    if not self.dry_run and self._cooldown.get(_cd_key, 0) > _now_tick:
+                        logger.debug("CompoundPolygon[%s]: %s em cooldown (%.0fs)",
+                                     comet_key, borrower[:10] + "…",
+                                     self._cooldown[_cd_key] - _now_tick)
                 else:
                     watch_count += 1
-                    logger.debug(
-                        "CompoundPolygon[%s]: vigiar %s HF=%.4f dívida=$%.2f",
-                        comet_key, borrower[:10] + "…", opp.health_factor, opp.total_debt_usd,
-                    )
+                    logger.debug("CompoundPolygon[%s]: vigiar %s HF=%.4f dívida=$%.2f",
+                                 comet_key, borrower[:10] + "…",
+                                 opp.health_factor, opp.total_debt_usd)
 
+                should_exec = (
+                    opp.is_liquidatable
+                    and not self.dry_run
+                    and opp.estimated_profit_usd >= self.min_profit
+                    and self._cooldown.get(_cd_key, 0) <= _now_tick
+                )
+                opp_list.append((opp, _cd_key, opp.is_liquidatable, should_exec))
+
+            # ── Fase 2: execução paralela por wallet pool ─────────────────────
+            tx_map: dict[str, str | None] = {}
+            to_exec = sorted(
+                [(opp, cd) for opp, cd, _, se in opp_list if se],
+                key=lambda x: -x[0].estimated_profit_usd,
+            )
+            if to_exec:
+                logger.info("CompoundPolygon[%s]: %d liquidações → %d wallet(s)",
+                            comet_key, len(to_exec), self._wallet_pool.size)
+
+                def _exec_task(pair):
+                    opp, cd = pair
+                    try:
+                        with self._wallet_pool.borrow(timeout=1.5) as _pk:
+                            return cd, self._execute_live(opp, pk=_pk)
+                    except Exception as _e:
+                        logger.warning("CompoundPolygon: wallet indisponível para %s: %s",
+                                       cd[:10], _e)
+                        return cd, None
+
+                with ThreadPoolExecutor(max_workers=self._wallet_pool.size) as _ex:
+                    for _cd, _tx in _ex.map(_exec_task, to_exec):
+                        tx_map[_cd] = _tx
+
+            # ── Fase 3: resultados + state update ────────────────────────────
+            for opp, _cd_key, is_liq, should_exec in opp_list:
+                tx_hash = tx_map.get(_cd_key) if should_exec else None
+                if should_exec:
+                    if tx_hash:
+                        self._fail_counts.pop(_cd_key, None)
+                        self.notifier.notify(
+                            "trade_executed",
+                            f"🟢 Compound Polygon[{comet_key}] ABSORB "
+                            f"{opp.borrower[:10]}… "
+                            f"lucro≈${opp.estimated_profit_usd:.2f} "
+                            f"| tx={tx_hash[:20]}…",
+                        )
+                    else:
+                        _cnt = self._fail_counts.get(_cd_key, 0) + 1
+                        self._fail_counts[_cd_key] = _cnt
+                        if _cnt >= _BLACKLIST_FAILS:
+                            self._blacklist[_cd_key] = opp.health_factor
+                            logger.warning("CompoundPolygon[%s]: %s adicionado à blacklist (%d falhas)",
+                                           comet_key, opp.borrower[:10] + "…", _cnt)
                 self._record(opp)
                 results.append({
                     "comet":           comet_key,
-                    "borrower":        borrower,
+                    "borrower":        opp.borrower,
                     "hf":              opp.health_factor,
-                    "is_liquidatable": opp.is_liquidatable,
+                    "is_liquidatable": is_liq,
                     "debt_usd":        opp.total_debt_usd,
                     "profit_usd":      opp.estimated_profit_usd,
                     "executed":        tx_hash is not None,

@@ -29,6 +29,7 @@ import queue
 import threading
 import time
 import websockets
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import requests
@@ -40,6 +41,7 @@ from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
+from utils.wallet_pool import WalletPool
 
 logger = get_logger(__name__)
 
@@ -259,6 +261,7 @@ class MorphoLiquidatorPolygonBot:
         self._ws_thread.start()
 
         self.notifier = TelegramNotifier(self.settings)
+        self._wallet_pool = WalletPool()
         init_db()
 
         logger.info(
@@ -550,14 +553,16 @@ class MorphoLiquidatorPolygonBot:
 
     # ── execução live ─────────────────────────────────────────────────────────
 
-    def _execute_live(self, opp: LiqOpportunityMorphoPolygon, nonce: int) -> str | None:
+    def _execute_live(self, opp: LiqOpportunityMorphoPolygon, nonce: int | None = None, *, pk: str | None = None) -> str | None:
         _cd_key = f"{opp.market_id[:10]}:{opp.borrower.lower()}"
         market = self._market_params(opp.market_id)
         if not market:
             return None
         try:
-            pk   = get_env("BSC_PRIVATE_KEY") or ""
+            pk   = pk or get_env("BSC_PRIVATE_KEY") or ""
             acct = self.w3.eth.account.from_key(pk)
+            if nonce is None:
+                nonce = self.w3.eth.get_transaction_count(acct.address, 'pending')
             mp_tuple = (
                 Web3.to_checksum_address(market["loanToken"]),
                 Web3.to_checksum_address(market["collateralToken"]),
@@ -687,16 +692,11 @@ class MorphoLiquidatorPolygonBot:
         if not self._positions:
             return []
 
-        _pk    = get_env("BSC_PRIVATE_KEY") or ""
-        _acct  = self.w3.eth.account.from_key(_pk)
-        try:
-            _nonce = self.w3.eth.get_transaction_count(_acct.address, 'pending')
-        except Exception as exc:
-            logger.warning("MorphoPolygon: get_nonce falhou — tick saltado: %s", exc)
-            return []
         if not self.dry_run:
+            _pk_chk = self._wallet_pool.primary_pk or get_env("BSC_PRIVATE_KEY") or ""
+            _acct_chk = self.w3.eth.account.from_key(_pk_chk)
             try:
-                _bal_wei = self.w3.eth.get_balance(_acct.address)
+                _bal_wei = self.w3.eth.get_balance(_acct_chk.address)
             except Exception as exc:
                 logger.warning("MorphoPolygon: get_balance falhou — tick saltado: %s", exc)
                 return []
@@ -711,14 +711,14 @@ class MorphoLiquidatorPolygonBot:
         logger.info("MorphoPolygon Tick: bloco=%d %d posições | %d blacklist",
                     block_num, len(self._positions), len(self._blacklist))
 
-        results: list[dict] = []
+        # ── Fase 1: verificar posições, recolher liquidáveis ─────────────────
+        opp_list: list[tuple] = []  # (opp, _cd_key, is_liq, should_exec)
         checked = 0
 
         for (market_id, borrower) in list(self._positions.keys()):
             if checked >= self.max_per_tick:
                 break
             checked += 1
-
             _cd_key = f"{market_id[:10]}:{borrower.lower()}"
 
             opp = self._check_position(market_id, borrower)
@@ -728,14 +728,12 @@ class MorphoLiquidatorPolygonBot:
             if _cd_key in self._blacklist:
                 _bl_hf = self._blacklist[_cd_key]
                 if abs(opp.health_factor - _bl_hf) / max(_bl_hf, 0.001) < 0.05:
-                    logger.debug("MorphoPolygon: %s blacklisted — saltado",
-                                 borrower[:10] + "…")
+                    logger.debug("MorphoPolygon: %s blacklisted — saltado", borrower[:10] + "…")
                     continue
                 del self._blacklist[_cd_key]
                 self._fail_counts.pop(_cd_key, None)
                 logger.info("MorphoPolygon: %s saiu da blacklist", borrower[:10] + "…")
 
-            tx_hash = None
             is_liq = opp.health_factor < 1.0
             if is_liq:
                 logger.info(
@@ -743,31 +741,6 @@ class MorphoLiquidatorPolygonBot:
                     borrower[:10] + "…", opp.collateral_symbol, opp.loan_symbol,
                     opp.health_factor, opp.borrow_usd, opp.estimated_profit_usd, self.dry_run,
                 )
-                if not self.dry_run and opp.estimated_profit_usd >= self.min_profit:
-                    _until = self._cooldown.get(_cd_key, 0)
-                    if _until > _now_tick:
-                        logger.debug("MorphoPolygon: %s em cooldown (%.0fs)",
-                                     borrower[:10] + "…", _until - _now_tick)
-                    else:
-                        tx_hash = self._execute_live(opp, nonce=_nonce)
-                        if tx_hash is None:
-                            _cnt = self._fail_counts.get(_cd_key, 0) + 1
-                            self._fail_counts[_cd_key] = _cnt
-                            if _cnt >= _BLACKLIST_FAILS:
-                                self._blacklist[_cd_key] = opp.health_factor
-                                logger.warning(
-                                    "MorphoPolygon: %s adicionado à blacklist (%d falhas)",
-                                    borrower[:10] + "…", _cnt,
-                                )
-                        else:
-                            self._fail_counts.pop(_cd_key, None)
-                            _nonce += 1
-                            self.notifier.notify(
-                                "trade_executed",
-                                f"🟣 Morpho Polygon LIQUIDATE {borrower[:10]}… "
-                                f"{opp.collateral_symbol}/{opp.loan_symbol} "
-                                f"lucro≈${opp.estimated_profit_usd:.2f} | tx={tx_hash[:20]}…",
-                            )
             else:
                 logger.debug(
                     "MorphoPolygon: vigiar %s %s/%s HF=%.4f dívida=$%.2f",
@@ -775,17 +748,70 @@ class MorphoLiquidatorPolygonBot:
                     opp.health_factor, opp.borrow_usd,
                 )
 
+            should_exec = (
+                is_liq
+                and not self.dry_run
+                and opp.estimated_profit_usd >= self.min_profit
+                and self._cooldown.get(_cd_key, 0) <= _now_tick
+            )
+            if is_liq and not self.dry_run and self._cooldown.get(_cd_key, 0) > _now_tick:
+                logger.debug("MorphoPolygon: %s em cooldown (%.0fs)", borrower[:10] + "…",
+                             self._cooldown[_cd_key] - _now_tick)
+            opp_list.append((opp, _cd_key, is_liq, should_exec))
+
+        # ── Fase 2: execução paralela por wallet pool ─────────────────────────
+        tx_map: dict[str, str | None] = {}
+        to_exec = sorted(
+            [(opp, cd) for opp, cd, _, se in opp_list if se],
+            key=lambda x: -x[0].estimated_profit_usd,
+        )
+        if to_exec:
+            logger.info("MorphoPolygon: %d liquidações → %d wallet(s)", len(to_exec), self._wallet_pool.size)
+
+            def _exec_task(pair):
+                opp, cd = pair
+                try:
+                    with self._wallet_pool.borrow(timeout=1.5) as _pk:
+                        return cd, self._execute_live(opp, pk=_pk)
+                except Exception as _e:
+                    logger.warning("MorphoPolygon: wallet indisponível para %s: %s", cd[:10], _e)
+                    return cd, None
+
+            with ThreadPoolExecutor(max_workers=self._wallet_pool.size) as _ex:
+                for _cd, _tx in _ex.map(_exec_task, to_exec):
+                    tx_map[_cd] = _tx
+
+        # ── Fase 3: resultados + state update ────────────────────────────────
+        results: list[dict] = []
+        for opp, _cd_key, is_liq, should_exec in opp_list:
+            tx_hash = tx_map.get(_cd_key) if should_exec else None
+            if should_exec:
+                if tx_hash:
+                    self._fail_counts.pop(_cd_key, None)
+                    self.notifier.notify(
+                        "trade_executed",
+                        f"🟣 Morpho Polygon LIQUIDATE {opp.borrower[:10]}… "
+                        f"{opp.collateral_symbol}/{opp.loan_symbol} "
+                        f"lucro≈${opp.estimated_profit_usd:.2f} | tx={tx_hash[:20]}…",
+                    )
+                else:
+                    _cnt = self._fail_counts.get(_cd_key, 0) + 1
+                    self._fail_counts[_cd_key] = _cnt
+                    if _cnt >= _BLACKLIST_FAILS:
+                        self._blacklist[_cd_key] = opp.health_factor
+                        logger.warning("MorphoPolygon: %s adicionado à blacklist (%d falhas)",
+                                       opp.borrower[:10] + "…", _cnt)
             self._record(opp)
             results.append({
-                "borrower":    borrower,
-                "market_id":   market_id[:10],
-                "loan":        opp.loan_symbol,
-                "collateral":  opp.collateral_symbol,
-                "hf":          opp.health_factor,
+                "borrower":     opp.borrower,
+                "market_id":    _cd_key.split(":")[0],
+                "loan":         opp.loan_symbol,
+                "collateral":   opp.collateral_symbol,
+                "hf":           opp.health_factor,
                 "liquidatable": is_liq,
-                "borrow_usd":  opp.borrow_usd,
-                "profit_usd":  opp.estimated_profit_usd,
-                "executed":    tx_hash is not None,
+                "borrow_usd":   opp.borrow_usd,
+                "profit_usd":   opp.estimated_profit_usd,
+                "executed":     tx_hash is not None,
             })
 
         liquidable = sum(1 for r in results if r["liquidatable"])
