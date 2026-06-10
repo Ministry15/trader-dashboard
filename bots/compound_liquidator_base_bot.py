@@ -50,10 +50,10 @@ _PRICE_DECIMALS   = 8          # getPrice retorna USD × 1e8
 _CF_SCALE         = 1e18       # borrowCollateralFactor / liquidateCollateralFactor em 1e18
 _GAS_UNITS        = 500_000    # absorb() + buyCollateral() estimativa
 _ABSORB_DISCOUNT  = 0.05       # desconto conservador de 5% no buyCollateral
-_BASE_FALLBACK_RPC  = "https://1rpc.io/base"
+_BASE_FALLBACK_RPC  = "https://base.publicnode.com"
 _BASE_EXTRA_RPCS    = [
-    "https://base.publicnode.com",
     "https://base.drpc.org",
+    "https://1rpc.io/base",
 ]
 
 _HF_LIQUIDATABLE = 1.0
@@ -513,16 +513,29 @@ class CompoundLiquidatorBaseBot:
         try:
             pk   = get_env("BSC_PRIVATE_KEY") or ""
             acct = self.w3.eth.account.from_key(pk)
-            try:
-                self.comet.functions.absorb(
-                    acct.address,
-                    [Web3.to_checksum_address(opp.borrower)],
-                ).call({"from": acct.address})
-            except Exception as sim_exc:
+            # simulação usa 1rpc.io/base para evitar 429 no RPC principal
+            _sim_rpcs = [_BASE_FALLBACK_RPC] + [u for u in self._rpc_urls if u != _BASE_FALLBACK_RPC]
+            _sim_ok = False
+            _last_sim_exc: Exception | None = None
+            for _sim_url in _sim_rpcs:
+                try:
+                    _sim_w3    = Web3(Web3.HTTPProvider(_sim_url, request_kwargs={"timeout": 20}))
+                    _sim_comet = _sim_w3.eth.contract(address=COMET_ADDRESS, abi=_COMET_ABI)
+                    _sim_comet.functions.absorb(
+                        acct.address,
+                        [Web3.to_checksum_address(opp.borrower)],
+                    ).call({"from": acct.address})
+                    _sim_ok = True
+                    break
+                except Exception as _exc:
+                    _last_sim_exc = _exc
+                    if "429" not in str(_exc) and "Too Many" not in str(_exc):
+                        break  # erro de revert — não adianta tentar outro RPC
+            if not _sim_ok:
                 self._cooldown[_b_low] = time.time() + 120
                 logger.warning(
                     "CompoundBase: simulação falhou %s — cooldown 2min: %s",
-                    opp.borrower[:10] + "…", sim_exc,
+                    opp.borrower[:10] + "…", _last_sim_exc,
                 )
                 return None
             tx = self.comet.functions.absorb(
