@@ -40,7 +40,7 @@ POOL_ADDRESS   = Web3.to_checksum_address("0x794a61358D6845594F94dc1DB02A252b5b4
 ORACLE_ADDRESS = Web3.to_checksum_address("0xD81eb3728a631871a7eBBaD631b5f424909f0c77")
 OP_CHAIN_ID    = 10
 WETH_OP        = "0x4200000000000000000000000000000000000006"  # gas token para custo USD
-_OP_FALLBACK_RPC = "https://optimism.llamarpc.com"
+_OP_FALLBACK_RPC = "https://optimism.drpc.org"
 
 # Bonus de liquidação Aave V3 Optimism (valores conservadores)
 _BONUS: dict[str, float] = {

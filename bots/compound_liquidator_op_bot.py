@@ -49,7 +49,7 @@ OP_CHAIN_ID         = 10
 _PRICE_DECIMALS     = 8         # getPrice retorna USD × 1e8
 _CF_SCALE           = 1e18      # collateralFactor em 1e18
 _GAS_UNITS          = 500_000   # absorb() estimativa conservadora
-_OP_FALLBACK_RPC    = "https://optimism.llamarpc.com"
+_OP_FALLBACK_RPC    = "https://optimism.drpc.org"
 
 # WETH Optimism — usado para estimar preço do gas em USD
 _WETH_ADDRESS       = "0x4200000000000000000000000000000000000006"

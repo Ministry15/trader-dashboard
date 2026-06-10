@@ -54,7 +54,7 @@ POLYGON_CHAIN_ID  = 137
 _ORACLE_SCALE     = 10 ** 36   # Morpho oracles: price × 1e36
 _LLTV_SCALE       = 10 ** 18   # LLTV em WAD
 _GAS_UNITS        = 350_000    # liquidate() na Polygon
-_FALLBACK_RPC_1   = "https://polygon-rpc.com"
+_FALLBACK_RPC_1   = "https://polygon.drpc.org"
 _FALLBACK_RPC_2   = "https://rpc.ankr.com/polygon"
 
 _HF_LIQUIDATABLE = 1.0
