@@ -32,6 +32,7 @@ from web3.exceptions import ContractLogicError
 
 from utils.config import get_env
 from utils.database import init_db, upsert_liquidation_opportunity
+from utils.flashbots import send_bundle as _fb_send_bundle
 from utils.notifier import TelegramNotifier
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,9 @@ _BASE_WSS_FALLBACK = "wss://base.drpc.org"
 
 # Scan incremental a cada N blocos (~2 min em Base com 2s por bloco)
 _SCAN_INTERVAL_BLOCKS = 60
+
+_FLASHBOTS_ENDPOINT      = "https://relay.flashbots.net"
+_FLASHBOTS_MIN_PROFIT_USD = 500.0
 
 # ── Moonwell Base addresses ───────────────────────────────────────────────────
 _COMPTROLLER = Web3.to_checksum_address("0xfBb21d0380beE3312B33c4353c8936a0F13EF26C")
@@ -500,6 +504,26 @@ class MoonwellLiquidatorBaseBot:
             if pk.startswith("0x"):
                 pk = pk[2:]
             signed = Account.sign_transaction(tx, pk)
+            if opp.net_profit_usd >= _FLASHBOTS_MIN_PROFIT_USD:
+                try:
+                    _tgt = self.w3.eth.block_number + 1
+                    _bh = _fb_send_bundle(
+                        "0x" + signed.raw_transaction.hex(),
+                        _tgt, _FLASHBOTS_ENDPOINT, pk,
+                    )
+                    if _bh:
+                        _exp = Web3.keccak(primitive=bytes(signed.raw_transaction))
+                        logger.info("MoonwellBase: TX via Flashbots @ bloco %d: %s…", _tgt, _exp.hex()[:18])
+                        self.notifier.notify(
+                            "liquidation",
+                            f"🟢 MOONWELL BASE via Flashbots bloco {_tgt}\n"
+                            f"borrower={opp.borrower[:12]}…\n"
+                            f"lucro≈${opp.net_profit_usd:.2f}\n"
+                            f"tx≈{_exp.hex()[:16]}…",
+                        )
+                        return True
+                except Exception as _fb_exc:
+                    logger.warning("MoonwellBase: Flashbots falhou — fallback mempool: %s", _fb_exc)
             tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
             receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 

@@ -41,6 +41,7 @@ from web3.exceptions import ContractLogicError
 
 from utils.config import get_env, get_settings
 from utils.database import init_db, upsert_liquidation_opportunity
+from utils.flashbots import send_bundle as _fb_send_bundle
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
@@ -66,6 +67,9 @@ _BASE_WSS_FALLBACK = "wss://base.drpc.org"
 _SCAN_INTERVAL_BLOCKS = 60   # ~2 min em Base (2s/bloco)
 
 _HF_LIQUIDATABLE = 1.0
+
+_FLASHBOTS_ENDPOINT      = "https://relay.flashbots.net"
+_FLASHBOTS_MIN_PROFIT_USD = 500.0
 _BLACKLIST_FAILS  = 3
 
 # ── ABI mínimo do Comet ───────────────────────────────────────────────────────
@@ -565,7 +569,20 @@ class CompoundLiquidatorBaseBot:
                 "gasPrice": int(self.w3.eth.gas_price * 1.15),
                 "nonce":    nonce,
             })
-            signed  = acct.sign_transaction(tx)
+            signed = acct.sign_transaction(tx)
+            if opp.estimated_profit_usd >= _FLASHBOTS_MIN_PROFIT_USD:
+                try:
+                    _tgt = self.w3.eth.block_number + 1
+                    _bh = _fb_send_bundle(
+                        "0x" + signed.raw_transaction.hex(),
+                        _tgt, _FLASHBOTS_ENDPOINT, pk,
+                    )
+                    if _bh:
+                        _exp = Web3.keccak(primitive=bytes(signed.raw_transaction))
+                        logger.info("CompoundBase: TX via Flashbots @ bloco %d: %s…", _tgt, _exp.hex()[:18])
+                        return _exp.hex()
+                except Exception as _fb_exc:
+                    logger.warning("CompoundBase: Flashbots falhou — fallback mempool: %s", _fb_exc)
             tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
             logger.info("CompoundBase: ABSORB TX: %s", tx_hash.hex())
             return tx_hash.hex()

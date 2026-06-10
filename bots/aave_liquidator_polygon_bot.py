@@ -29,6 +29,7 @@ from web3.exceptions import ContractLogicError
 
 from utils.config import get_env, get_settings
 from utils.database import init_db, upsert_liquidation_opportunity
+from utils.flashbots import send_bundle as _fb_send_bundle
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
@@ -58,6 +59,9 @@ _BONUS: dict[str, float] = {
 _DEFAULT_BONUS    = 0.050  # 5% conservador
 
 _HF_LIQUIDATABLE = 1.0      # Aave V3: só liquidável quando HF < 1.0 (monitorização em 1.2)
+
+_FLASHBOTS_ENDPOINT      = "https://polygon.flashbots.net"
+_FLASHBOTS_MIN_PROFIT_USD = 200.0
 _DEBT_MIN_USD    = 500.0
 _DEBT_MAX_USD    = 50_000.0
 _BLACKLIST_FAILS = 3
@@ -720,7 +724,20 @@ class AaveLiquidatorPolygonBot:
                 "gasPrice": self._calc_gas_price(opp.net_profit_usd),
                 "nonce":    self.w3.eth.get_transaction_count(acct.address, 'pending'),
             })
-            signed  = acct.sign_transaction(tx)
+            signed = acct.sign_transaction(tx)
+            if opp.net_profit_usd >= _FLASHBOTS_MIN_PROFIT_USD:
+                try:
+                    _tgt = self.w3.eth.block_number + 1
+                    _bh = _fb_send_bundle(
+                        "0x" + signed.raw_transaction.hex(),
+                        _tgt, _FLASHBOTS_ENDPOINT, pk,
+                    )
+                    if _bh:
+                        _exp = Web3.keccak(primitive=bytes(signed.raw_transaction))
+                        logger.info("AavePolygon: TX via Flashbots @ bloco %d: %s…", _tgt, _exp.hex()[:18])
+                        return _exp.hex()
+                except Exception as _fb_exc:
+                    logger.warning("AavePolygon: Flashbots falhou — fallback mempool: %s", _fb_exc)
             tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
             logger.info("AavePolygon: LIQUIDAÇÃO TX: %s", tx_hash.hex())
             return tx_hash.hex()
