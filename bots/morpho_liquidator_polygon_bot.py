@@ -39,6 +39,7 @@ from web3.exceptions import ContractLogicError
 from utils.config import get_env, get_settings
 from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
+from utils.flashbots import send_bundle_multi as _fb_send_multi
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 from utils.wallet_pool import WalletPool
@@ -74,6 +75,7 @@ _HF_LIQUIDATABLE = 1.0
 _FLASHBOTS_ENDPOINT      = "https://polygon.flashbots.net"
 _FLASHBOTS_MIN_PROFIT_USD = 200.0
 _BLACKLIST_FAILS  = 3
+_MAX_BUNDLE_TXS   = 4
 
 # Stablecoins Polygon (minúsculas): (symbol, decimals, usd_price)
 _STABLE_TOKENS: dict[str, tuple[str, int, float]] = {
@@ -616,6 +618,75 @@ class MorphoLiquidatorPolygonBot:
             logger.warning("MorphoPolygon: liquidate revertida — cooldown 5min: %s", exc)
             return None
 
+    # ── bundle helpers ────────────────────────────────────────────────────────
+
+    def _sign_tx_nosim(self, opp: LiqOpportunityMorphoPolygon, pk: str, nonce: int) -> bytes | None:
+        """Build+sign liquidate tx without eth_call simulation (for bundle use)."""
+        market = self._market_params(opp.market_id)
+        if not market:
+            return None
+        try:
+            from eth_account import Account as _Acct
+            if pk.startswith("0x"):
+                pk = pk[2:]
+            acct = _Acct.from_key(pk)
+            mp_tuple = (
+                Web3.to_checksum_address(market["loanToken"]),
+                Web3.to_checksum_address(market["collateralToken"]),
+                Web3.to_checksum_address(market["oracle"]),
+                Web3.to_checksum_address(market["irm"]),
+                market["lltv"],
+            )
+            tx = self.morpho.functions.liquidate(
+                mp_tuple,
+                Web3.to_checksum_address(opp.borrower),
+                0, 0, b"",
+            ).build_transaction({
+                "from":     acct.address,
+                "chainId":  POLYGON_CHAIN_ID,
+                "gas":      _GAS_UNITS,
+                "gasPrice": int(self.w3.eth.gas_price * 1.15),
+                "nonce":    nonce,
+            })
+            signed = _Acct.sign_transaction(tx, pk)
+            return bytes(signed.raw_transaction)
+        except Exception as exc:
+            logger.warning("MorphoPolygon: _sign_tx_nosim falhou %s: %s",
+                           opp.borrower[:10] + "…", exc)
+            return None
+
+    def _try_bundle(self, to_exec: list[tuple]) -> set[str]:
+        """Sign all txs (no sim) and submit as Flashbots bundle. Returns bundled cd_keys."""
+        if len(to_exec) < 2:
+            return set()
+        try:
+            pk = get_env("BSC_PRIVATE_KEY") or ""
+            pk = pk.strip().strip('"').strip("'")
+            if pk.startswith("0x"):
+                pk = pk[2:]
+            from eth_account import Account as _Acct
+            acct       = _Acct.from_key(pk)
+            base_nonce = self.w3.eth.get_transaction_count(acct.address)
+            target     = self.w3.eth.block_number + 1
+            raw_txes, cd_keys = [], []
+            for i, (opp, _cd_key) in enumerate(to_exec[:_MAX_BUNDLE_TXS]):
+                raw = self._sign_tx_nosim(opp, pk, base_nonce + i)
+                if raw is None:
+                    continue
+                raw_txes.append("0x" + raw.hex())
+                cd_keys.append(_cd_key)
+            if len(raw_txes) < 2:
+                return set()
+            bh = _fb_send_multi(raw_txes, target, _FLASHBOTS_ENDPOINT, pk)
+            if bh:
+                logger.info("MorphoPolygon: bundle %d txs @ bloco %d: %s…",
+                            len(raw_txes), target, bh[:16])
+                return set(cd_keys)
+            return set()
+        except Exception as exc:
+            logger.warning("MorphoPolygon: bundle falhou → fallback individual: %s", exc)
+            return set()
+
     # ── tick ──────────────────────────────────────────────────────────────────
 
     def _ws_runner(self) -> None:
@@ -759,27 +830,35 @@ class MorphoLiquidatorPolygonBot:
                              self._cooldown[_cd_key] - _now_tick)
             opp_list.append((opp, _cd_key, is_liq, should_exec))
 
-        # ── Fase 2: execução paralela por wallet pool ─────────────────────────
+        # ── Fase 2: bundle attempt + fallback individual ──────────────────────
         tx_map: dict[str, str | None] = {}
+        bundled: set[str] = set()
         to_exec = sorted(
             [(opp, cd) for opp, cd, _, se in opp_list if se],
             key=lambda x: -x[0].estimated_profit_usd,
         )
         if to_exec:
-            logger.info("MorphoPolygon: %d liquidações → %d wallet(s)", len(to_exec), self._wallet_pool.size)
+            logger.info("MorphoPolygon: %d liquidações prontas", len(to_exec))
+            if len(to_exec) >= 2:
+                bundled = self._try_bundle(to_exec)
+                for _cd in bundled:
+                    tx_map[_cd] = "bundle"
 
-            def _exec_task(pair):
-                opp, cd = pair
-                try:
-                    with self._wallet_pool.borrow(timeout=1.5) as _pk:
-                        return cd, self._execute_live(opp, pk=_pk)
-                except Exception as _e:
-                    logger.warning("MorphoPolygon: wallet indisponível para %s: %s", cd[:10], _e)
-                    return cd, None
+            remaining = [(opp, cd) for opp, cd in to_exec if cd not in bundled]
+            if remaining:
+                def _exec_task(pair):
+                    opp, cd = pair
+                    try:
+                        with self._wallet_pool.borrow(timeout=1.5) as _pk:
+                            return cd, self._execute_live(opp, pk=_pk)
+                    except Exception as _e:
+                        logger.warning("MorphoPolygon: wallet indisponível para %s: %s",
+                                       cd[:10], _e)
+                        return cd, None
 
-            with ThreadPoolExecutor(max_workers=self._wallet_pool.size) as _ex:
-                for _cd, _tx in _ex.map(_exec_task, to_exec):
-                    tx_map[_cd] = _tx
+                with ThreadPoolExecutor(max_workers=self._wallet_pool.size) as _ex:
+                    for _cd, _tx in _ex.map(_exec_task, remaining):
+                        tx_map[_cd] = _tx
 
         # ── Fase 3: resultados + state update ────────────────────────────────
         results: list[dict] = []

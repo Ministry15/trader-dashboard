@@ -35,6 +35,7 @@ from web3.exceptions import ContractLogicError
 from utils.config import get_env, get_settings
 from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
+from utils.flashbots import send_bundle_multi as _fb_send_multi
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 from utils.wallet_pool import WalletPool
@@ -68,6 +69,7 @@ _HF_LIQUIDATABLE = 1.0
 _FLASHBOTS_ENDPOINT      = "https://polygon.flashbots.net"
 _FLASHBOTS_MIN_PROFIT_USD = 200.0
 _BLACKLIST_FAILS  = 3
+_MAX_BUNDLE_TXS   = 4
 
 # WMATIC — usado para estimar preço do gas em USD
 _WMATIC_ADDRESS       = "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"
@@ -582,6 +584,47 @@ class CompoundLiquidatorPolygonBot:
                            opp.comet_key, exc)
             return None
 
+    # ── bundle helper ────────────────────────────────────────────────────────
+
+    def _try_bundle_comet(self, comet_key: str, liq_opps: list[tuple], pk: str) -> set[str]:
+        """Submit multi-borrower absorb tx via Flashbots. Returns bundled cd_keys."""
+        if len(liq_opps) < 2:
+            return set()
+        try:
+            from eth_account import Account as _Acct
+            if pk.startswith("0x"):
+                pk = pk[2:]
+            acct        = _Acct.from_key(pk)
+            contract    = self._contracts[comet_key]
+            opps_capped = liq_opps[:_MAX_BUNDLE_TXS]
+            borrowers   = [Web3.to_checksum_address(opp.borrower) for opp, _ in opps_capped]
+            cd_keys     = [cd for _, cd in opps_capped]
+            nonce = self.w3.eth.get_transaction_count(acct.address, 'pending')
+            tx = contract.functions.absorb(
+                acct.address, borrowers,
+            ).build_transaction({
+                "from":     acct.address,
+                "chainId":  POLYGON_CHAIN_ID,
+                "gas":      _GAS_UNITS * len(borrowers),
+                "gasPrice": int(self.w3.eth.gas_price * 1.15),
+                "nonce":    nonce,
+            })
+            signed  = _Acct.sign_transaction(tx, pk)
+            raw_hex = "0x" + bytes(signed.raw_transaction).hex()
+            target  = self.w3.eth.block_number + 1
+            bh = _fb_send_bundle(raw_hex, target, _FLASHBOTS_ENDPOINT, pk)
+            if bh:
+                logger.info(
+                    "CompoundPolygon[%s]: bundle multi-absorb %d borrowers @ bloco %d: %s…",
+                    comet_key, len(borrowers), target, bh[:16],
+                )
+                return set(cd_keys)
+            return set()
+        except Exception as exc:
+            logger.warning("CompoundPolygon[%s]: _try_bundle_comet falhou → fallback: %s",
+                           comet_key, exc)
+            return set()
+
     # ── tick ──────────────────────────────────────────────────────────────────
 
     def _ws_runner(self) -> None:
@@ -730,29 +773,38 @@ class CompoundLiquidatorPolygonBot:
                 )
                 opp_list.append((opp, _cd_key, opp.is_liquidatable, should_exec))
 
-            # ── Fase 2: execução paralela por wallet pool ─────────────────────
+            # ── Fase 2: bundle (multi-absorb) + fallback individual ───────────
             tx_map: dict[str, str | None] = {}
+            bundled: set[str] = set()
             to_exec = sorted(
                 [(opp, cd) for opp, cd, _, se in opp_list if se],
                 key=lambda x: -x[0].estimated_profit_usd,
             )
             if to_exec:
-                logger.info("CompoundPolygon[%s]: %d liquidações → %d wallet(s)",
-                            comet_key, len(to_exec), self._wallet_pool.size)
+                logger.info("CompoundPolygon[%s]: %d liquidações prontas",
+                            comet_key, len(to_exec))
+                if len(to_exec) >= 2:
+                    _pk_bdl = get_env("BSC_PRIVATE_KEY") or ""
+                    _pk_bdl = _pk_bdl.strip().strip('"').strip("'")
+                    bundled = self._try_bundle_comet(comet_key, to_exec, _pk_bdl)
+                    for _cd in bundled:
+                        tx_map[_cd] = "bundle"
 
-                def _exec_task(pair):
-                    opp, cd = pair
-                    try:
-                        with self._wallet_pool.borrow(timeout=1.5) as _pk:
-                            return cd, self._execute_live(opp, pk=_pk)
-                    except Exception as _e:
-                        logger.warning("CompoundPolygon: wallet indisponível para %s: %s",
-                                       cd[:10], _e)
-                        return cd, None
+                remaining = [(opp, cd) for opp, cd in to_exec if cd not in bundled]
+                if remaining:
+                    def _exec_task(pair):
+                        opp, cd = pair
+                        try:
+                            with self._wallet_pool.borrow(timeout=1.5) as _pk:
+                                return cd, self._execute_live(opp, pk=_pk)
+                        except Exception as _e:
+                            logger.warning("CompoundPolygon: wallet indisponível para %s: %s",
+                                           cd[:10], _e)
+                            return cd, None
 
-                with ThreadPoolExecutor(max_workers=self._wallet_pool.size) as _ex:
-                    for _cd, _tx in _ex.map(_exec_task, to_exec):
-                        tx_map[_cd] = _tx
+                    with ThreadPoolExecutor(max_workers=self._wallet_pool.size) as _ex:
+                        for _cd, _tx in _ex.map(_exec_task, remaining):
+                            tx_map[_cd] = _tx
 
             # ── Fase 3: resultados + state update ────────────────────────────
             for opp, _cd_key, is_liq, should_exec in opp_list:

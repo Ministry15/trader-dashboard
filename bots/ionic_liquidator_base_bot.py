@@ -35,6 +35,7 @@ from web3.exceptions import ContractLogicError
 from utils.config import get_env, get_settings
 from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
+from utils.flashbots import send_bundle_multi as _fb_send_multi
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
@@ -58,6 +59,7 @@ _SCAN_INTERVAL_BLOCKS  = 60   # ~2 min on Base (2s/block)
 
 _FLASHBOTS_ENDPOINT       = "https://relay.flashbots.net"
 _FLASHBOTS_MIN_PROFIT_USD = 500.0
+_MAX_BUNDLE_TXS           = 4
 
 # ── Ionic Base addresses ──────────────────────────────────────────────────────
 _COMPTROLLER = Web3.to_checksum_address("0x05c9C6417F246600f8f5f49fcA9Ee991bfF73D13")
@@ -487,6 +489,47 @@ class IonicLiquidatorBaseBot:
             logger.error("IonicBase: execução falhou: %s", exc)
             return False
 
+    # ── Multi-bundle (Phase 6) ───────────────────────────────────────────────
+    def _try_bundle(self, opps: list) -> set[str]:
+        """Same flash contract as Moonwell — bundle N executeMoonwellLiquidation calls."""
+        if self.flash is None or len(opps) < 2:
+            return set()
+        try:
+            from eth_account import Account as _Acct
+            pk = get_env("BSC_PRIVATE_KEY", "").strip().strip('"').strip("'")
+            if pk.startswith("0x"):
+                pk = pk[2:]
+            acct       = _Acct.from_key(pk)
+            gas_price  = self._calc_gas_price(max(o.net_profit_usd for o in opps))
+            base_nonce = self.w3.eth.get_transaction_count(acct.address)
+            target     = self.w3.eth.block_number + 1
+
+            raw_txes, borrowers = [], []
+            for i, opp in enumerate(opps[:_MAX_BUNDLE_TXS]):
+                tx = self.flash.functions.executeMoonwellLiquidation(
+                    opp.c_debt, opp.c_collateral, opp.borrower,
+                    opp.repay_amount, opp.pool_fee,
+                ).build_transaction({
+                    "from":     acct.address,
+                    "gas":      900_000,
+                    "gasPrice": gas_price,
+                    "nonce":    base_nonce + i,
+                    "chainId":  8453,
+                })
+                signed = _Acct.sign_transaction(tx, pk)
+                raw_txes.append("0x" + signed.raw_transaction.hex())
+                borrowers.append(opp.borrower)
+
+            bh = _fb_send_multi(raw_txes, target, _FLASHBOTS_ENDPOINT, pk)
+            if bh:
+                logger.info("IonicBase: bundle %d txs @ bloco %d: %s…",
+                            len(raw_txes), target, bh[:16])
+                return set(borrowers)
+            return set()
+        except Exception as exc:
+            logger.warning("IonicBase: bundle falhou → fallback individual: %s", exc)
+            return set()
+
     # ── WebSocket ─────────────────────────────────────────────────────────────
     def _ws_runner(self) -> None:
         loop = asyncio.new_event_loop()
@@ -575,16 +618,38 @@ class IonicLiquidatorBaseBot:
         results: list[dict] = []
         liquidatable = executed = 0
 
+        # ── Pass 1: verificar todos ───────────────────────────────────────────
+        checked_opps: list[tuple] = []
         for borrower in to_check:
             opp = self._check_borrower(borrower)
-            if opp is None:
-                continue
+            if opp is not None:
+                checked_opps.append((opp, borrower))
 
+        # ── Bundle attempt (Phase 6) ──────────────────────────────────────────
+        bundled: set[str] = set()
+        if not self.dry_run and len(checked_opps) >= 2:
+            _bdl = sorted(
+                [(o, b) for o, b in checked_opps if o.net_profit_usd >= self.min_profit],
+                key=lambda x: -x[0].net_profit_usd,
+            )
+            if len(_bdl) >= 2:
+                bundled = self._try_bundle([o for o, _ in _bdl])
+                if bundled:
+                    for _, b in _bdl:
+                        if b in bundled:
+                            executed += 1
+                            self._cooldown[b] = now + 300
+                            self._fail_counts.pop(b, None)
+                    logger.info("IonicBase: %d txs enviadas via bundle Flashbots", len(bundled))
+
+        # ── Pass 2: log, upsert, execução individual ──────────────────────────
+        for opp, borrower in checked_opps:
             liquidatable += 1
             logger.info(
-                "IonicBase: LIQUIDAÇÃO %s  debt=%s $%.2f  col=%s  lucro≈$%.2f  dry=%s",
+                "IonicBase: LIQUIDAÇÃO %s  debt=%s $%.2f  col=%s  lucro≈$%.2f  dry=%s%s",
                 borrower[:12], opp.debt_symbol, opp.repay_usd,
                 opp.col_symbol, opp.net_profit_usd, self.dry_run,
+                " [bundled]" if borrower in bundled else "",
             )
 
             upsert_liquidation_opportunity(
@@ -599,8 +664,14 @@ class IonicLiquidatorBaseBot:
                 liquidation_bonus_pct=round((_LIQ_INCENTIVE - 1) * 100, 1),
                 net_profit_usd=opp.net_profit_usd,
                 dry_run=self.dry_run,
-                status="dry_run" if self.dry_run else "pending",
+                status="dry_run" if self.dry_run else ("bundled" if borrower in bundled else "pending"),
             )
+
+            if borrower in bundled:
+                results.append({"borrower": borrower, "debt_usd": opp.repay_usd,
+                                 "profit_usd": opp.net_profit_usd, "executed": True,
+                                 "dry_run": False})
+                continue
 
             if not self.dry_run:
                 ok = self._execute(opp)
@@ -623,7 +694,7 @@ class IonicLiquidatorBaseBot:
             })
 
         logger.info(
-            "IonicBase: tick bloco=%d — %d liquidáveis / %d executados (%d checados)",
-            block_num, liquidatable, executed, len(to_check),
+            "IonicBase: tick bloco=%d — %d liquidáveis / %d executados (%d bundled, %d checados)",
+            block_num, liquidatable, executed, len(bundled), len(to_check),
         )
         return results

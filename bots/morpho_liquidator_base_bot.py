@@ -31,10 +31,13 @@ from web3.exceptions import ContractLogicError
 from utils.config import get_env, get_settings
 from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
+from utils.flashbots import send_bundle_multi as _fb_send_multi
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
 logger = get_logger(__name__)
+
+_MAX_BUNDLE_TXS = 4
 
 # ── Morpho Blue Base ───────────────────────────────────────────────────────────
 
@@ -602,6 +605,54 @@ class MorphoLiquidatorBaseBot:
                 logger.error("MorphoBase: falha ao executar liquidate: %s", exc)
             return None
 
+    # ── Multi-bundle (Phase 6) ───────────────────────────────────────────────
+    def _try_bundle(self, opps: list, base_nonce: int) -> set[str]:
+        """Bundle N Morpho liquidate() calls into one Flashbots bundle.
+        Returns set of position_keys that were bundled."""
+        if len(opps) < 2:
+            return set()
+        try:
+            pk   = get_env("BSC_PRIVATE_KEY") or ""
+            acct = self.w3.eth.account.from_key(pk)
+            target = self.w3.eth.block_number + 1
+
+            raw_txes, keys = [], []
+            for i, opp in enumerate(opps[:_MAX_BUNDLE_TXS]):
+                market = self._market_params(opp.market_id)
+                if not market:
+                    continue
+                mp_tuple = (
+                    Web3.to_checksum_address(market["loanToken"]),
+                    Web3.to_checksum_address(market["collateralToken"]),
+                    Web3.to_checksum_address(market["oracle"]),
+                    Web3.to_checksum_address(market["irm"]),
+                    market["lltv"],
+                )
+                tx = self.morpho.functions.liquidate(
+                    mp_tuple, Web3.to_checksum_address(opp.borrower), 0, 0, b"",
+                ).build_transaction({
+                    "from":     acct.address,
+                    "chainId":  BASE_CHAIN_ID,
+                    "gas":      _GAS_UNITS,
+                    "gasPrice": self.w3.eth.gas_price,
+                    "nonce":    base_nonce + i,
+                })
+                signed = acct.sign_transaction(tx)
+                raw_txes.append("0x" + signed.raw_transaction.hex())
+                keys.append(opp.position_key)
+
+            if len(raw_txes) < 2:
+                return set()
+            bh = _fb_send_multi(raw_txes, target, _FLASHBOTS_ENDPOINT, pk)
+            if bh:
+                logger.info("MorphoBase: bundle %d txs @ bloco %d: %s…",
+                            len(raw_txes), target, bh[:16])
+                return set(keys)
+            return set()
+        except Exception as exc:
+            logger.warning("MorphoBase: bundle falhou → fallback individual: %s", exc)
+            return set()
+
     # ── tick ──────────────────────────────────────────────────────────────────
 
     def tick(self) -> list[dict]:
@@ -649,6 +700,26 @@ class MorphoLiquidatorBaseBot:
             len(eligible), _n_liq, _n_cooldown, _n_blacklist,
         )
 
+        # ── Bundle attempt (Phase 6) ──────────────────────────────────────────
+        bundled: set[str] = set()
+        if not self.dry_run and len(eligible) >= 2:
+            _bdl = sorted(
+                [o for o in eligible
+                 if o.health_factor < _HF_LIQUIDATABLE
+                 and o.estimated_profit_usd >= self.min_profit
+                 and self._cooldown.get(o.position_key, 0) <= time.time()
+                 and o.position_key not in self._blacklist],
+                key=lambda o: -o.estimated_profit_usd,
+            )
+            if len(_bdl) >= 2:
+                bundled = self._try_bundle(_bdl, _nonce)
+                if bundled:
+                    _nonce += len(bundled)
+                    for _o in _bdl:
+                        if _o.position_key in bundled:
+                            self._fail_counts.pop(_o.position_key, None)
+                    logger.info("MorphoBase: %d txs enviadas via bundle Flashbots", len(bundled))
+
         results: list[dict] = []
         for opp in eligible:
             _pos_key = opp.position_key
@@ -680,6 +751,8 @@ class MorphoLiquidatorBaseBot:
                 if _until > _now:
                     logger.debug("MorphoBase: %s em cooldown (%.0fs restantes) — saltado",
                                  _pos_key, _until - _now)
+                elif _pos_key in bundled:
+                    tx_hash = "bundle"; executed = True  # já enviado no bundle
                 else:
                     tx_hash = self._execute_live(opp, nonce=_nonce)
                     if tx_hash is None:

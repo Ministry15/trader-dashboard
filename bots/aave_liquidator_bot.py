@@ -33,6 +33,7 @@ from web3.exceptions import ContractLogicError
 from utils.config import get_env, get_settings
 from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
+from utils.flashbots import send_bundle_multi as _fb_send_multi
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
@@ -60,8 +61,9 @@ _DEFAULT_BONUS     = 0.050  # 5% conservador
 _HF_LIQUIDATABLE = 1.0      # Aave V3: só liquidável quando HF < 1.0 (monitorização em 1.2)
 
 _FLASHBOTS_ENDPOINT      = "https://relay.flashbots.net"
-_FLASHBOTS_MIN_PROFIT_USD = 500.0   # só envia via Flashbots acima deste lucro
+_FLASHBOTS_MIN_PROFIT_USD = 500.0
 _DEBT_MIN_USD    = 500.0
+_MAX_BUNDLE_TXS  = 4
 _DEBT_MAX_USD    = 50_000.0
 _BLACKLIST_FAILS = 3
 
@@ -729,6 +731,56 @@ class AaveLiquidatorBot:
                 logger.error("Falha ao executar liquidação: %s", exc)
             return None
 
+    # ── Multi-bundle (Phase 6) ───────────────────────────────────────────────
+    def _try_bundle(self, opps_and_keys: list[tuple], base_nonce: int) -> set[str]:
+        """Bundle N Aave executeFlashLiquidation calls into one Flashbots bundle.
+        opps_and_keys: list of (opp, b_low). Returns set of b_low that were bundled."""
+        if self.flash is None or len(opps_and_keys) < 2:
+            return set()
+        try:
+            pk   = get_env("BSC_PRIVATE_KEY") or ""
+            acct = self.w3.eth.account.from_key(pk)
+            gas  = self._calc_gas_price(max(o.net_profit_usd for o, _ in opps_and_keys))
+            _POOL_FEES_BUNDLE = {
+                "0x4200000000000000000000000000000000000006": 500,
+                "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": 500,
+                "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": 500,
+                "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": 100,
+            }
+            raw_txes, keys = [], []
+            for i, (opp, b_low) in enumerate(opps_and_keys[:_MAX_BUNDLE_TXS]):
+                debt_oracle = self._get_asset_price(opp.debt_asset)
+                token_dec   = self._token_decimals(opp.debt_asset)
+                debt_units  = int(opp.debt_to_cover_usd
+                                  / (debt_oracle / 10 ** _ORACLE_DECIMALS)
+                                  * 10 ** token_dec)
+                pool_fee = _POOL_FEES_BUNDLE.get(opp.collateral_asset.lower(), 3000)
+                tx = self.flash.functions.executeFlashLiquidation(
+                    Web3.to_checksum_address(opp.debt_asset),
+                    Web3.to_checksum_address(opp.collateral_asset),
+                    Web3.to_checksum_address(opp.borrower),
+                    debt_units, pool_fee,
+                ).build_transaction({
+                    "from":    acct.address,
+                    "chainId": BASE_CHAIN_ID,
+                    "gas":     _GAS_UNITS,
+                    "gasPrice": gas,
+                    "nonce":   base_nonce + i,
+                })
+                signed = acct.sign_transaction(tx)
+                raw_txes.append("0x" + signed.raw_transaction.hex())
+                keys.append(b_low)
+            target = self.w3.eth.block_number + 1
+            bh = _fb_send_multi(raw_txes, target, _FLASHBOTS_ENDPOINT, pk)
+            if bh:
+                logger.info("AaveBase: bundle %d txs @ bloco %d: %s…",
+                            len(raw_txes), target, bh[:16])
+                return set(keys)
+            return set()
+        except Exception as exc:
+            logger.warning("AaveBase: bundle falhou → fallback individual: %s", exc)
+            return set()
+
     # ── tick ─────────────────────────────────────────────────────────────────
 
     def tick(self) -> list[dict]:
@@ -796,6 +848,28 @@ class AaveLiquidatorBot:
             len(eligible), _n_liq, _n_cooldown, _n_blacklist,
         )
 
+        # ── Bundle attempt (Phase 6) ──────────────────────────────────────────
+        bundled: set[str] = set()
+        if not self.dry_run and _n_liq >= 2:
+            _bdl_list = []
+            for _b, _hf, _cu, _du in eligible:
+                _bl = _b.lower()
+                if _bl in self._blacklist: continue
+                if _hf >= _HF_LIQUIDATABLE: continue
+                if self._cooldown.get(_bl, 0) > _now_tick: continue
+                _o = self._estimate(_b, _hf, _cu, _du, _pre=reserve_data if reserve_data else None)
+                if _o.net_profit_usd < self.min_profit: continue
+                _bdl_list.append((_o, _bl))
+            if len(_bdl_list) >= 2:
+                _bdl_sorted = sorted(_bdl_list, key=lambda x: -x[0].net_profit_usd)
+                bundled = self._try_bundle(_bdl_sorted, _nonce)
+                if bundled:
+                    _nonce += len(bundled)
+                    for _bk in bundled:
+                        self._cooldown[_bk] = _now_tick + 300
+                        self._fail_counts.pop(_bk, None)
+                    logger.info("AaveBase: %d liquidações via Flashbots bundle", len(bundled))
+
         results: list[dict] = []
         for borrower, hf, col_usd, debt_usd in eligible:
             _b_low = borrower.lower()
@@ -834,6 +908,8 @@ class AaveLiquidatorBot:
                         "Base: %s em cooldown (%.0fs restantes) — saltado",
                         borrower[:10] + "…", _until - _now,
                     )
+                elif _b_low in bundled:
+                    tx_hash = "bundle"; executed = True
                 else:
                     tx_hash = self._execute_live(opp, nonce=_nonce)
                     if tx_hash is None:

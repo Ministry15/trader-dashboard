@@ -42,10 +42,13 @@ from web3.exceptions import ContractLogicError
 from utils.config import get_env, get_settings
 from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
+from utils.flashbots import send_bundle_multi as _fb_send_multi
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
 logger = get_logger(__name__)
+
+_MAX_BUNDLE_TXS = 4
 
 # ── Compound V3 Base — endereços ──────────────────────────────────────────────
 
@@ -591,6 +594,63 @@ class CompoundLiquidatorBaseBot:
             logger.warning("CompoundBase: absorb revertida — cooldown 5min: %s", exc)
             return None
 
+    # ── Multi-bundle (Phase 6) ───────────────────────────────────────────────
+    def _try_bundle(self, opps: list, base_nonce: int) -> set[str]:
+        """Compound V3: absorb([b1, b2, ...]) in ONE tx (more efficient than multi-tx bundle).
+        Falls back to multi-tx bundle if multi-absorb fails."""
+        if len(opps) < 2:
+            return set()
+        try:
+            pk   = get_env("BSC_PRIVATE_KEY") or ""
+            acct = self.w3.eth.account.from_key(pk)
+            target = self.w3.eth.block_number + 1
+
+            # Group by comet (each comet gets its own absorb call)
+            comet_groups: dict = {}
+            for opp in opps[:_MAX_BUNDLE_TXS]:
+                comet_groups.setdefault(opp.comet_key, []).append(opp)
+
+            raw_txes, keys = [], []
+            nonce_off = 0
+            for comet_key, group_opps in comet_groups.items():
+                contract = self._contracts.get(comet_key)
+                if not contract:
+                    continue
+                borrowers = [Web3.to_checksum_address(o.borrower) for o in group_opps]
+                tx = contract.functions.absorb(
+                    acct.address, borrowers,
+                ).build_transaction({
+                    "from":     acct.address,
+                    "chainId":  BASE_CHAIN_ID,
+                    "gas":      _GAS_UNITS * len(borrowers),
+                    "gasPrice": int(self.w3.eth.gas_price * 1.15),
+                    "nonce":    base_nonce + nonce_off,
+                })
+                signed = acct.sign_transaction(tx)
+                raw_txes.append("0x" + signed.raw_transaction.hex())
+                keys.extend(o.borrower.lower() for o in group_opps)
+                nonce_off += 1
+
+            if not raw_txes:
+                return set()
+
+            if len(raw_txes) == 1:
+                # Single comet: use regular send_bundle
+                from utils.flashbots import send_bundle as _fb
+                bh = _fb(raw_txes[0], target, _FLASHBOTS_ENDPOINT, pk)
+            else:
+                bh = _fb_send_multi(raw_txes, target, _FLASHBOTS_ENDPOINT, pk)
+
+            if bh:
+                total = sum(len(g) for g in comet_groups.values())
+                logger.info("CompoundBase: bundle %d borrowers / %d tx @ bloco %d: %s…",
+                            total, len(raw_txes), target, bh[:16])
+                return set(keys)
+            return set()
+        except Exception as exc:
+            logger.warning("CompoundBase: bundle falhou → fallback individual: %s", exc)
+            return set()
+
     # ── tick ─────────────────────────────────────────────────────────────────
 
     def _ws_runner(self) -> None:
@@ -689,6 +749,27 @@ class CompoundLiquidatorBaseBot:
         logger.info("CompoundBase Tick: bloco=%d %d candidatos | %d blacklist",
                     block_num, len(candidates), len(self._blacklist))
 
+        # ── Bundle attempt (Phase 6) ──────────────────────────────────────────
+        bundled: set[str] = set()
+        if not self.dry_run:
+            # pre-check: collect liquidatable opps
+            _bdl_candidates = []
+            for _b in candidates:
+                _o = self._check_position(_b)
+                if (_o and _o.is_liquidatable
+                        and _o.estimated_profit_usd >= self.min_profit
+                        and self._cooldown.get(_b.lower(), 0) <= time.time()):
+                    _bdl_candidates.append(_o)
+            if len(_bdl_candidates) >= 2:
+                if _nonce is None:
+                    _nonce = self.w3.eth.get_transaction_count(_acct.address, 'pending')
+                _bdl_sorted = sorted(_bdl_candidates, key=lambda o: -o.estimated_profit_usd)
+                bundled = self._try_bundle(_bdl_sorted, _nonce)
+                if bundled:
+                    _nonce += len({o.borrower.lower() for o in _bdl_candidates
+                                   if o.borrower.lower() in bundled})
+                    logger.info("CompoundBase: %d borrowers via bundle Flashbots", len(bundled))
+
         results: list[dict] = []
         _liq_count = _watch_count = 0
 
@@ -722,6 +803,8 @@ class CompoundLiquidatorBaseBot:
                     if _until > _now_tick:
                         logger.debug("CompoundBase: %s em cooldown (%.0fs)",
                                      borrower[:10] + "…", _until - _now_tick)
+                    elif _b_low in bundled:
+                        tx_hash = "bundle"  # já enviado no bundle
                     else:
                         if _nonce is None:
                             _nonce = self.w3.eth.get_transaction_count(_acct.address, 'pending')

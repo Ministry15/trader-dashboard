@@ -32,6 +32,7 @@ from utils.config import get_env, get_settings
 from utils.wallet_pool import WalletPool
 from utils.database import init_db, upsert_liquidation_opportunity
 from utils.flashbots import send_bundle as _fb_send_bundle
+from utils.flashbots import send_bundle_multi as _fb_send_multi
 from utils.logger import get_logger
 from utils.notifier import TelegramNotifier
 
@@ -67,6 +68,7 @@ _FLASHBOTS_MIN_PROFIT_USD = 200.0
 _DEBT_MIN_USD    = 500.0
 _DEBT_MAX_USD    = 50_000.0
 _BLACKLIST_FAILS = 3
+_MAX_BUNDLE_TXS  = 4
 
 _TOKEN_SYMBOLS: dict[str, str] = {
     "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": "WMATIC",
@@ -79,6 +81,14 @@ _TOKEN_SYMBOLS: dict[str, str] = {
 }
 
 _GAS_UNITS        = 500_000   # estimativa flash loan + liquidação
+_POOL_FEES_POLYGON: dict[str, int] = {
+    "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": 500,   # WMATIC
+    "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": 500,   # WETH
+    "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": 100,   # USDC.e
+    "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": 100,   # USDC
+    "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": 100,   # USDT
+    "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063": 100,   # DAI
+}
 _ORACLE_DECIMALS  = 8         # Aave oracle: USD com 8 decimais
 _HF_DECIMALS      = 18        # healthFactor em ray (1e18)
 _ACCOUNT_DECIMALS = 8         # totalCollateralBase/totalDebtBase em USD×1e8
@@ -687,15 +697,7 @@ class AaveLiquidatorPolygonBot:
                               / (debt_oracle / 10 ** _ORACLE_DECIMALS)
                               * 10 ** token_dec)
 
-            _POOL_FEES = {
-                "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": 500,   # WMATIC
-                "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": 500,   # WETH
-                "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": 100,   # USDC.e
-                "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": 100,   # USDC
-                "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": 100,   # USDT
-                "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063": 100,   # DAI
-            }
-            pool_fee = _POOL_FEES.get(opp.collateral_asset.lower(), 3000)
+            pool_fee = _POOL_FEES_POLYGON.get(opp.collateral_asset.lower(), 3000)
 
             # Simulação obrigatória: eth_call antes de enviar TX (zero gas se falhar)
             try:
@@ -755,6 +757,75 @@ class AaveLiquidatorPolygonBot:
             else:
                 logger.error("AavePolygon: falha ao executar liquidação: %s", exc)
             return None
+
+    # ── bundle helpers ────────────────────────────────────────────────────────
+
+    def _sign_tx_nosim(self, opp: LiqOpportunityPolygon, pk: str, nonce: int) -> bytes | None:
+        """Build+sign tx without eth_call simulation (for bundle use)."""
+        if self.flash is None:
+            return None
+        try:
+            from eth_account import Account as _Acct
+            if pk.startswith("0x"):
+                pk = pk[2:]
+            acct       = _Acct.from_key(pk)
+            debt_oracle = self._get_asset_price(opp.debt_asset)
+            token_dec   = self._token_decimals(opp.debt_asset)
+            debt_units  = int(opp.debt_to_cover_usd
+                              / (debt_oracle / 10 ** _ORACLE_DECIMALS)
+                              * 10 ** token_dec)
+            pool_fee = _POOL_FEES_POLYGON.get(opp.collateral_asset.lower(), 3000)
+            tx = self.flash.functions.executeFlashLiquidation(
+                Web3.to_checksum_address(opp.debt_asset),
+                Web3.to_checksum_address(opp.collateral_asset),
+                Web3.to_checksum_address(opp.borrower),
+                debt_units,
+                pool_fee,
+            ).build_transaction({
+                "from":     acct.address,
+                "chainId":  POLYGON_CHAIN_ID,
+                "gas":      _GAS_UNITS,
+                "gasPrice": self._calc_gas_price(opp.net_profit_usd),
+                "nonce":    nonce,
+            })
+            signed = _Acct.sign_transaction(tx, pk)
+            return bytes(signed.raw_transaction)
+        except Exception as exc:
+            logger.warning("AavePolygon: _sign_tx_nosim falhou %s: %s",
+                           opp.borrower[:10] + "…", exc)
+            return None
+
+    def _try_bundle(self, to_exec: list[tuple]) -> set[str]:
+        """Sign all txs (no sim) and submit as Flashbots bundle. Returns bundled borrower_lowers."""
+        if self.flash is None or len(to_exec) < 2:
+            return set()
+        try:
+            pk = get_env("BSC_PRIVATE_KEY") or ""
+            pk = pk.strip().strip('"').strip("'")
+            if pk.startswith("0x"):
+                pk = pk[2:]
+            from eth_account import Account as _Acct
+            acct       = _Acct.from_key(pk)
+            base_nonce = self.w3.eth.get_transaction_count(acct.address)
+            target     = self.w3.eth.block_number + 1
+            raw_txes, b_lows = [], []
+            for i, (opp, _b_low) in enumerate(to_exec[:_MAX_BUNDLE_TXS]):
+                raw = self._sign_tx_nosim(opp, pk, base_nonce + i)
+                if raw is None:
+                    continue
+                raw_txes.append("0x" + raw.hex())
+                b_lows.append(_b_low)
+            if len(raw_txes) < 2:
+                return set()
+            bh = _fb_send_multi(raw_txes, target, _FLASHBOTS_ENDPOINT, pk)
+            if bh:
+                logger.info("AavePolygon: bundle %d txs @ bloco %d: %s…",
+                            len(raw_txes), target, bh[:16])
+                return set(b_lows)
+            return set()
+        except Exception as exc:
+            logger.warning("AavePolygon: bundle falhou → fallback individual: %s", exc)
+            return set()
 
     # ── tick ─────────────────────────────────────────────────────────────────
 
@@ -860,29 +931,35 @@ class AaveLiquidatorPolygonBot:
                              borrower[:10] + "…", self._cooldown[_b_low] - _now_exec)
             opp_list.append((opp, _b_low, should_exec))
 
-        # ── Fase 2: execução paralela por wallet pool ─────────────────────────
+        # ── Fase 2: bundle attempt + fallback individual ──────────────────────
         tx_map: dict[str, str | None] = {}
+        bundled: set[str] = set()
         to_exec = sorted(
             [(opp, bl) for opp, bl, se in opp_list if se],
             key=lambda x: -x[0].net_profit_usd,
         )
         if to_exec:
-            logger.info("AavePolygon: %d liquidações prontas → %d wallet(s) disponíveis",
-                        len(to_exec), self._wallet_pool.size)
+            logger.info("AavePolygon: %d liquidações prontas", len(to_exec))
+            if len(to_exec) >= 2:
+                bundled = self._try_bundle(to_exec)
+                for _bl in bundled:
+                    tx_map[_bl] = "bundle"
 
-            def _exec_task(pair):
-                opp, bl = pair
-                try:
-                    with self._wallet_pool.borrow(timeout=1.5) as _pk:
-                        return bl, self._execute_live(opp, pk=_pk)
-                except Exception as _e:
-                    logger.warning("AavePolygon: wallet indisponível para %s: %s",
-                                   bl[:10] + "…", _e)
-                    return bl, None
+            remaining = [(opp, bl) for opp, bl in to_exec if bl not in bundled]
+            if remaining:
+                def _exec_task(pair):
+                    opp, bl = pair
+                    try:
+                        with self._wallet_pool.borrow(timeout=1.5) as _pk:
+                            return bl, self._execute_live(opp, pk=_pk)
+                    except Exception as _e:
+                        logger.warning("AavePolygon: wallet indisponível para %s: %s",
+                                       bl[:10] + "…", _e)
+                        return bl, None
 
-            with ThreadPoolExecutor(max_workers=self._wallet_pool.size) as _ex:
-                for _bl, _tx in _ex.map(_exec_task, to_exec):
-                    tx_map[_bl] = _tx
+                with ThreadPoolExecutor(max_workers=self._wallet_pool.size) as _ex:
+                    for _bl, _tx in _ex.map(_exec_task, remaining):
+                        tx_map[_bl] = _tx
 
         # ── Fase 3: resultados + state update ────────────────────────────────
         results: list[dict] = []
