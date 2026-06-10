@@ -1,5 +1,6 @@
 # Segredos — NUNCA versionar
 .env
+.env.backup
 
 # Ambiente virtual
 venv/
@@ -13,6 +14,20 @@ __pycache__/
 
 # Dados em runtime (base de dados, logs)
 data/
+logs/
+out/
+cache/
+
+# Backups automáticos
+*.backup
+*.bak
+
+# Forge build artifacts e scaffold
+contracts/out/
+contracts/cache/
+contracts/src/Counter.sol
+contracts/script/Counter.s.sol
+contracts/test/
 
 # IDEs / editores
 .idea/
