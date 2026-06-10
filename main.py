@@ -28,6 +28,7 @@ from bots.aave_liquidator_linea_bot import AaveLiquidatorLineaBot
 from bots.aave_liquidator_op_bot import AaveLiquidatorOpBot
 from bots.compound_liquidator_arb_bot import CompoundLiquidatorArbBot
 from bots.compound_liquidator_base_bot import CompoundLiquidatorBaseBot
+from bots.moonwell_liquidator_base_bot import MoonwellLiquidatorBaseBot
 from bots.morpho_liquidator_arb_bot import MorphoLiquidatorArbBot
 from bots.morpho_liquidator_base_bot import MorphoLiquidatorBaseBot
 from bots.aave_liquidator_scroll_bot import AaveLiquidatorScrollBot
@@ -79,6 +80,8 @@ BOT_REGISTRY = {
                                lambda s: int(s.get("bots", {}).get("aave_liquidator_scroll", {}).get("poll_seconds", 30))),
     "aave_liquidator_linea": (AaveLiquidatorLineaBot, "tick",
                               lambda s: int(s.get("bots", {}).get("aave_liquidator_linea", {}).get("poll_seconds", 30))),
+    "moonwell_liquidator_base": (MoonwellLiquidatorBaseBot, "tick",
+                                lambda s: int(s.get("bots", {}).get("moonwell_liquidator_base", {}).get("poll_seconds", 30))),
     "compound_liquidator_base": (CompoundLiquidatorBaseBot, "tick",
                                  lambda s: int(s.get("bots", {}).get("compound_liquidator_base", {}).get("poll_seconds", 30))),
     "compound_liquidator_arb": (CompoundLiquidatorArbBot, "tick",
