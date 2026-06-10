@@ -414,6 +414,28 @@ class MoonwellLiquidatorBaseBot:
 
         return best
 
+    # ── Dynamic gas pricing ───────────────────────────────────────────────────
+    def _calc_gas_price(self, net_profit_usd: float) -> int:
+        """Priority tip em 3 tiers baseado no lucro estimado. Devolve gasPrice em Wei."""
+        try:
+            base_fee = self.w3.eth.get_block("latest")["baseFeePerGas"]
+        except Exception:
+            base_fee = int(0.005 * 1e9)  # 0.005 gwei fallback (mínimo Base)
+
+        if net_profit_usd < 50:
+            tip_gwei = 1.5    # 1-2 gwei — baixa competição
+        elif net_profit_usd < 500:
+            tip_gwei = 7.5    # 5-10 gwei — competição média
+        else:
+            tip_gwei = 25.0   # 20-30 gwei — alta competição
+
+        gas_price = base_fee + int(tip_gwei * 1e9)
+        logger.info(
+            "MoonwellBase: gas_price=%.4f gwei (base=%.4f + tip=%.1f) lucro≈$%.2f",
+            gas_price / 1e9, base_fee / 1e9, tip_gwei, net_profit_usd,
+        )
+        return gas_price
+
     # ── Execute liquidation ───────────────────────────────────────────────────
     def _execute(self, opp: MoonwellOpportunity) -> bool:
         if self.flash is None:
@@ -448,7 +470,7 @@ class MoonwellLiquidatorBaseBot:
             ).build_transaction({
                 "from":     Web3.to_checksum_address(wallet),
                 "gas":      800_000,
-                "gasPrice": self.w3.eth.gas_price,
+                "gasPrice": self._calc_gas_price(opp.net_profit_usd),
                 "nonce":    self.w3.eth.get_transaction_count(
                     Web3.to_checksum_address(wallet)),
             })
