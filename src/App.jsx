@@ -8,7 +8,7 @@ import {
   Activity, TrendingUp, TrendingDown, Zap, Grid, DollarSign,
   Server, FileText, RefreshCw, AlertTriangle,
   CheckCircle, XCircle, Cpu, HardDrive, MemoryStick,
-  BarChart2, Target, X, Download
+  BarChart2, Target, X, Download, Gauge
 } from 'lucide-react';
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -1361,6 +1361,140 @@ function LogsTab() {
   );
 }
 
+// ─── SPEED ────────────────────────────────────────────────────────────────────
+function SpeedTab({ data, onMeasure, loading }) {
+  function latColor(v) {
+    if (v == null) return '#555';
+    if (v < 50)   return 'var(--green)';
+    if (v < 150)  return 'var(--yellow)';
+    return 'var(--red)';
+  }
+  function deltaColor(v) {
+    if (v == null) return '#555';
+    return v > 50 ? 'var(--red)' : v > 0 ? 'var(--yellow)' : 'var(--green)';
+  }
+  function fmtDelta(v) {
+    if (v == null) return '—';
+    return (v > 0 ? '+' : '') + v + 'ms';
+  }
+
+  const bots = data?.bots ?? [];
+
+  return (
+    <div>
+      <div className="panel mb">
+        <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>RPC SPEED — {bots.length > 0 ? `${bots.length} BOTS` : 'NÃO MEDIDO'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {bots.length > 0 && (
+              <span style={{ fontSize: 10, fontWeight: 400 }}>
+                <span style={{ color: 'var(--green)' }}>● &lt;50ms</span>
+                {' · '}
+                <span style={{ color: 'var(--yellow)' }}>● 50-150ms</span>
+                {' · '}
+                <span style={{ color: 'var(--red)' }}>● &gt;150ms</span>
+              </span>
+            )}
+            <button
+              className={`btn${loading ? ' spin' : ''}`}
+              onClick={onMeasure}
+              disabled={loading}
+              style={{ padding: '2px 8px', fontSize: 10 }}
+            >
+              <RefreshCw size={9} />
+              {loading ? ' A MEDIR...' : ' MEDIR AGORA'}
+            </button>
+          </div>
+        </div>
+
+        {loading && bots.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: '#666', fontSize: 11 }}>
+            A medir latência RPC para {'{'}17{'}'} bots em paralelo… (~10s)
+          </div>
+        )}
+
+        {!loading && bots.length === 0 && (
+          <div className="empty" style={{ padding: '32px 0' }}>
+            Clica "MEDIR AGORA" para medir a velocidade real de todos os bots
+          </div>
+        )}
+
+        {bots.length > 0 && (
+          <>
+            <div style={{ overflowX: 'auto', marginTop: 10 }}>
+              <table style={{ width: '100%', fontSize: 10, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ color: '#555', borderBottom: '1px solid #2a2a2a' }}>
+                    <th style={{ padding: '4px 6px', textAlign: 'left',   width: 14 }}></th>
+                    <th style={{ padding: '4px 6px', textAlign: 'left'   }}>BOT</th>
+                    <th style={{ padding: '4px 6px', textAlign: 'left'   }}>CHAIN</th>
+                    <th style={{ padding: '4px 6px', textAlign: 'right'  }}>RPC LAT.</th>
+                    <th style={{ padding: '4px 6px', textAlign: 'center' }}>CONN</th>
+                    <th style={{ padding: '4px 6px', textAlign: 'right'  }}>TICK INT.</th>
+                    <th style={{ padding: '4px 6px', textAlign: 'right'  }}>POS. EST.</th>
+                    <th style={{ padding: '4px 6px', textAlign: 'right'  }}>vs ASHBURN</th>
+                    <th style={{ padding: '4px 6px', textAlign: 'right'  }}>vs AWS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bots.map((b, i) => {
+                    const lc = latColor(b.rpc_latency);
+                    return (
+                      <tr key={b.id} style={{ background: i % 2 ? 'rgba(255,255,255,.02)' : 'transparent', borderBottom: '1px solid #111' }}>
+                        <td style={{ padding: '5px 6px' }}>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: lc, display: 'inline-block' }} />
+                        </td>
+                        <td style={{ padding: '5px 6px', fontWeight: 600, color: '#ccc' }}>{b.name}</td>
+                        <td style={{ padding: '5px 6px', color: '#777' }}>{b.chain}</td>
+                        <td style={{ padding: '5px 6px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: lc }}>
+                          {b.rpc_latency != null ? `${b.rpc_latency}ms` : '—'}
+                        </td>
+                        <td style={{ padding: '5px 6px', textAlign: 'center' }}>
+                          <span className={`badge ${b.connection === 'websocket' ? 'bb' : ''}`} style={{ fontSize: 8 }}>
+                            {b.connection === 'websocket' ? 'WS' : 'HTTP'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '5px 6px', textAlign: 'right', fontFamily: 'monospace', color: '#777' }}>
+                          {b.tick_interval != null ? `${(b.tick_interval / 1000).toFixed(1)}s` : '—'}
+                        </td>
+                        <td style={{ padding: '5px 6px', textAlign: 'right', fontFamily: 'monospace', color: '#777' }}>
+                          {b.position_pct != null ? `${b.position_pct}%` : '—'}
+                        </td>
+                        <td style={{ padding: '5px 6px', textAlign: 'right', fontFamily: 'monospace', color: deltaColor(b.vs_ashburn) }}>
+                          {fmtDelta(b.vs_ashburn)}
+                        </td>
+                        <td style={{ padding: '5px 6px', textAlign: 'right', fontFamily: 'monospace', color: deltaColor(b.vs_aws) }}>
+                          {fmtDelta(b.vs_aws)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {data?.timestamp && (
+              <div style={{ fontSize: 9, color: '#444', marginTop: 8, textAlign: 'right' }}>
+                medido {data.timestamp.slice(0, 19).replace('T', ' ')} UTC
+                {data.bots?.[0]?.rpc_host && ` · ${data.bots[0].rpc_host}`}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="panel" style={{ fontSize: 10, color: '#555', lineHeight: 1.7 }}>
+        <div className="panel-head">METODOLOGIA</div>
+        <div style={{ paddingTop: 6 }}>
+          <strong style={{ color: '#777' }}>RPC Lat.:</strong> mediana de 2× eth_blockNumber ao RPC primário da chain (timeout 4s).&nbsp;
+          <strong style={{ color: '#777' }}>Tick Int.:</strong> mediana dos intervalos entre ticks consecutivos nos logs systemd (últimos 15min).&nbsp;
+          <strong style={{ color: '#777' }}>Pos. Est.:</strong> RPC Lat. / block_time × 100% — % do bloco já decorrido quando recebemos a notificação.&nbsp;
+          <strong style={{ color: '#777' }}>vs Ashburn / vs AWS:</strong> delta em relação a latências típicas de us-east-1 para cada chain (estimativas estáticas baseadas em localização de infraestrutura conhecida; negativo = somos mais rápidos).
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── SYSTEM ───────────────────────────────────────────────────────────────────
 function SystemTab({ data, botHealth, onAudit, auditLoading, auditData }) {
   if (!data) return <Loader />;
@@ -1619,6 +1753,7 @@ const TABS = [
   { id: 'liquidations', label: 'Liquidations', icon: Activity },
   { id: 'logs',       label: 'Logs',       icon: FileText   },
   { id: 'system',     label: 'System',     icon: Server     },
+  { id: 'speed',      label: 'Speed',      icon: Gauge      },
 ];
 
 export default function App() {
@@ -1654,6 +1789,8 @@ export default function App() {
   const [botHealth,                   setBotHealth]                   = useState(null);
   const [auditLoading,                setAuditLoading]                = useState(false);
   const [auditData,                   setAuditData]                   = useState(null);
+  const [speedData,                   setSpeedData]                   = useState(null);
+  const [speedLoading,                setSpeedLoading]                = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -1743,6 +1880,18 @@ export default function App() {
     }
   }, []);
 
+  const handleMeasureSpeed = useCallback(async () => {
+    setSpeedLoading(true);
+    try {
+      const data = await apiFetch('/api/speed');
+      setSpeedData(data);
+    } catch (e) {
+      console.error('Speed error:', e);
+    } finally {
+      setSpeedLoading(false);
+    }
+  }, []);
+
   return (
     <div className="app">
       {report && (
@@ -1807,6 +1956,7 @@ export default function App() {
         {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} dataMorphoBase={liquidationsMorphoBase} dataCompoundPolygon={liquidationsCompoundPolygon} dataCompoundArb={liquidationsCompoundArb} dataCompoundOp={liquidationsCompoundOp} dataMorphoPolygon={liquidationsMorphoPolygon} dataMorphoArb={liquidationsMorphoArb} />)}
         {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system} botHealth={botHealth} onAudit={handleAudit} auditLoading={auditLoading} auditData={auditData} />)}
+        {activeTab === 'speed'    && <SpeedTab data={speedData} onMeasure={handleMeasureSpeed} loading={speedLoading} />}
       </main>
     </div>
   );
