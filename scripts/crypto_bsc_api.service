@@ -1,0 +1,19 @@
+[Unit]
+Description=crypto_bsc REST API — porta 5000
+Documentation=file:/opt/crypto_bsc/CLAUDE.md
+After=network.target crypto_bsc.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/crypto_bsc
+ExecStart=/opt/crypto_bsc/venv/bin/python /opt/crypto_bsc/api.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=crypto_bsc_api
+
+[Install]
+WantedBy=multi-user.target
