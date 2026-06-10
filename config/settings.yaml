@@ -136,7 +136,9 @@ orchestrator:
     - "aave_liquidator_scroll"
     - "aave_liquidator_linea"
     - "compound_liquidator_base"
+    - "compound_liquidator_arb"
     - "morpho_liquidator_base"
+    - "morpho_liquidator_arb"
 
 # ------------------------------------------------------------------------------
 # BOTS — parâmetros por estratégia
@@ -179,15 +181,15 @@ bots:
     quote: "USDC"
     range_pct: 0.15           # ±15% do preço live no arranque
     grid_levels: 20
-    order_size_quote: 5       # $5 por ordem
+    order_size_quote: 25      # $25 por ordem (break-even Solana: ~$0.15/ordem, fee $0.0001)
     poll_seconds: 10
     recenter_threshold_pct: 50
 
   sniper:
     quote: "USDT"             # novos tokens BSC usam USDT como quote (não WBNB)
     dex: "pancakeswap_v2"
-    buy_amount_quote: 30      # 30 USDT por entrada (~equivalente a 0.05 WBNB)
-    max_price_impact_bps: 300 # impacto máximo aceitável na entrada (3%)
+    buy_amount_quote: 200     # 200 USDT por entrada — gas BSC (~$1/tx) fica abaixo de 0.5% do trade
+    max_price_impact_bps: 150 # impacto máximo reduzido para 1.5% (posição maior = mais cuidado)
     take_profit_bps: 5000     # +50% -> vender
     stop_loss_bps: 3000       # -30% -> cortar
     poll_seconds: 30          # intervalo de gestão de posições (s)
@@ -202,7 +204,7 @@ bots:
     entry_require_goplus: true    # rejeitar se GoPlus não tiver dados (tokens sem histórico)
 
     auto_discovery:
-      enabled: true
+      enabled: false              # desactivado: GeckoTerminal tem 5-10min de delay vs mempool directo
       scan_interval_seconds: 300  # re-scan a cada 5 min via GeckoTerminal
       min_volume_usd: 10000       # volume 24h > $10k
       min_liquidity_usd: 20000    # liquidez (TVL) > $20k
@@ -254,10 +256,10 @@ bots:
   aave_liquidator_arb:
     poll_seconds: 30                  # intervalo de scan (s)
     health_factor_threshold: 1.2      # monitorizar posições com HF abaixo disto
-    min_profit_usd: 8.0               # só executar se lucro líquido > $25 (DRY_RUN ignora)
+    min_profit_usd: 8.0               # só executar se lucro líquido > $8 (DRY_RUN ignora)
     max_positions_per_tick: 50        # máx. posições a verificar por tick
     borrower_scan_blocks: 5000        # janela de blocos para descobrir mutuários (~2h em Arbitrum)
-    flash_loan_contract: ""           # preencher quando contrato for deployado na Arbitrum
+    flash_loan_contract: "0x9531F6F28202B7E83717b31992035F769046135B"
     chain_id: 42161                   # Arbitrum One mainnet
 
   aave_liquidator_op:
@@ -302,6 +304,22 @@ bots:
     max_positions_per_tick: 100       # mais posições por tick (Morpho tem muita actividade)
     borrower_scan_blocks: 200000      # ~5.5h @ 2s/bloco Base; ~286 borrows/3900 blocos
     chain_id: 8453                    # Base mainnet
+
+  compound_liquidator_arb:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # vigiar posições com HF < 1.2
+    min_profit_usd: 25.0              # gas Arbitrum — absorb() ~$0.30 → breakeven $25
+    max_positions_per_tick: 50        # máx. posições a verificar por tick
+    borrower_scan_blocks: 400000      # ~5.5h @ 0.25s/bloco Arbitrum (blocos rápidos)
+    chain_id: 42161                   # Arbitrum One mainnet
+
+  morpho_liquidator_arb:
+    poll_seconds: 30                  # intervalo de scan (s)
+    health_factor_threshold: 1.2      # vigiar posições com HF < 1.2
+    min_profit_usd: 25.0              # liquidação directa sem flash loan — gas ~$0.30
+    max_positions_per_tick: 100       # Morpho tem muitos mercados isolados
+    borrower_scan_blocks: 400000      # ~5.5h @ 0.25s/bloco Arbitrum
+    chain_id: 42161                   # Arbitrum One mainnet
 
 # ------------------------------------------------------------------------------
 # NOTIFICAÇÕES

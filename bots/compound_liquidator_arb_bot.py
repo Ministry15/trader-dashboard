@@ -49,7 +49,7 @@ ARB_CHAIN_ID        = 42161
 _PRICE_DECIMALS     = 8         # getPrice retorna USD × 1e8
 _CF_SCALE           = 1e18      # collateralFactor em 1e18
 _GAS_UNITS          = 500_000   # absorb() estimativa conservadora
-_ARB_FALLBACK_RPC   = "https://arb1.arbitrum.io/rpc"
+_ARB_FALLBACK_RPC   = "https://arb.drpc.org"
 
 _HF_LIQUIDATABLE = 1.0
 _BLACKLIST_FAILS  = 3

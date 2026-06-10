@@ -54,7 +54,7 @@ ARB_CHAIN_ID     = 42161
 _ORACLE_SCALE    = 10 ** 36   # Morpho oracles: price × 1e36
 _LLTV_SCALE      = 10 ** 18   # LLTV em WAD
 _GAS_UNITS       = 350_000    # liquidate() no Arbitrum
-_FALLBACK_RPC_1  = "https://arb1.arbitrum.io/rpc"
+_FALLBACK_RPC_1  = "https://arb.drpc.org"
 _FALLBACK_RPC_2  = "https://rpc.ankr.com/arbitrum"
 
 _HF_LIQUIDATABLE = 1.0

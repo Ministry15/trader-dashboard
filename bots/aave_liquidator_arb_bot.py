@@ -40,7 +40,7 @@ POOL_ADDRESS   = Web3.to_checksum_address("0x794a61358D6845594F94dc1DB02A252b5b4
 ORACLE_ADDRESS = Web3.to_checksum_address("0xb56c2F0B653B2e0b10C9b928C8580Ac5Df02C7C7")
 ARB_CHAIN_ID   = 42161
 WETH_ARB       = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"  # gas token para custo USD
-_ARB_FALLBACK_RPC = "https://arb1.arbitrum.io/rpc"
+_ARB_FALLBACK_RPC = "https://arb.drpc.org"
 
 # Bonus de liquidação Aave V3 Arbitrum (valores conservadores)
 _BONUS: dict[str, float] = {
@@ -217,6 +217,7 @@ class AaveLiquidatorArbBot:
         init_db()
 
         if not flash_addr:
+            self.dry_run = True
             logger.warning(
                 "AaveArb: flash_loan_contract não configurado — modo DRY_RUN forçado para live"
             )

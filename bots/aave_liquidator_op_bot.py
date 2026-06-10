@@ -169,7 +169,7 @@ class AaveLiquidatorOpBot:
         self._rpc_urls: list[str] = [primary_rpc, _OP_FALLBACK_RPC]
         self._active_rpc: str = primary_rpc
 
-        self.dry_run      : bool  = str(get_env("DRY_RUN", "true")).lower() not in ("false", "0", "no")
+        self.dry_run      : bool  = str(get_env("DRY_RUN", "false")).lower() not in ("false", "0", "no")
         self.hf_threshold : float = float(self.cfg.get("health_factor_threshold", 1.2))
         self.min_profit   : float = float(self.cfg.get("min_profit_usd", 8.0))
         self.scan_blocks  : int   = int(self.cfg.get("borrower_scan_blocks", 50_000))
@@ -196,6 +196,7 @@ class AaveLiquidatorOpBot:
         init_db()
 
         if not flash_addr:
+            self.dry_run = True
             logger.warning(
                 "AaveOp: flash_loan_contract não configurado — modo DRY_RUN forçado para live"
             )
