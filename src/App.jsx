@@ -1362,7 +1362,7 @@ function LogsTab() {
 }
 
 // ─── SYSTEM ───────────────────────────────────────────────────────────────────
-function SystemTab({ data, botHealth }) {
+function SystemTab({ data, botHealth, onAudit, auditLoading, auditData }) {
   if (!data) return <Loader />;
 
   const cpu  = data.cpu_percent     ?? null;
@@ -1440,11 +1440,22 @@ function SystemTab({ data, botHealth }) {
         <div className="panel mb">
           <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>LIQUIDATION BOTS ({bots.length})</span>
-            <span style={{ fontSize: 10, fontWeight: 400 }}>
-              <span style={{ color: 'var(--green)' }}>{liveCount} LIVE</span>
-              {' · '}
-              <span style={{ color: 'var(--yellow)' }}>{dryCount} DRY-RUN</span>
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 10, fontWeight: 400 }}>
+                <span style={{ color: 'var(--green)' }}>{liveCount} LIVE</span>
+                {' · '}
+                <span style={{ color: 'var(--yellow)' }}>{dryCount} DRY-RUN</span>
+              </span>
+              <button
+                className={`btn${auditLoading ? ' spin' : ''}`}
+                onClick={onAudit}
+                disabled={auditLoading}
+                style={{ padding: '2px 7px', fontSize: 10 }}
+              >
+                <RefreshCw size={9} />
+                {auditLoading ? ' A AUDITAR...' : ' AUDITAR SISTEMA'}
+              </button>
+            </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, marginTop: 10 }}>
             {bots.map(b => {
@@ -1471,6 +1482,38 @@ function SystemTab({ data, botHealth }) {
                       ? `${b.contract.slice(0, 6)}…${b.contract.slice(-4)}`
                       : 'no contract'}
                   </div>
+                  {(() => {
+                    const ad = auditData?.bots?.find(ab => ab.id === b.id)?.audit;
+                    if (!ad) return null;
+                    const isActive = ad.systemd_status === 'active';
+                    const isWs     = ad.connection_type === 'websocket';
+                    const e429     = ad.errors_2h?.http_429    ?? 0;
+                    const econn    = ad.errors_2h?.no_connection ?? 0;
+                    return (
+                      <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid #2a2a2a', paddingTop: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, display: 'inline-block', background: isActive ? 'var(--green)' : 'var(--red)' }} />
+                          <span style={{ fontSize: 9, color: '#888' }}>{ad.systemd_status}</span>
+                          <span style={{ marginLeft: 2, fontSize: 8, padding: '1px 3px', borderRadius: 2, background: isWs ? 'rgba(0,170,255,.12)' : 'rgba(255,255,255,.05)', color: isWs ? 'var(--blue)' : '#555', border: isWs ? '1px solid rgba(0,170,255,.25)' : '1px solid #2a2a2a' }}>
+                            {isWs ? 'WS' : 'HTTP'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 9, color: '#666' }}>
+                          tick&nbsp;{ad.last_tick ? ad.last_tick.slice(11) : '—'}
+                        </div>
+                        <div style={{ fontSize: 9 }}>
+                          {e429  > 0 && <span style={{ color: 'var(--yellow)' }}>{e429}× 429&nbsp;</span>}
+                          {econn > 0 && <span style={{ color: 'var(--yellow)' }}>{econn}× conn&nbsp;</span>}
+                          {e429 === 0 && econn === 0 && <span style={{ color: '#333' }}>no errors</span>}
+                        </div>
+                        {ad.gas?.balance != null && (
+                          <div style={{ fontSize: 9, color: 'var(--green)' }}>
+                            {ad.gas.balance}&nbsp;{ad.gas.symbol}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -1609,6 +1652,8 @@ export default function App() {
   const [liquidationsMorphoArb,       setLiquidationsMorphoArb]       = useState(null);
   const [gas,                         setGas]                         = useState(null);
   const [botHealth,                   setBotHealth]                   = useState(null);
+  const [auditLoading,                setAuditLoading]                = useState(false);
+  const [auditData,                   setAuditData]                   = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -1686,6 +1731,18 @@ export default function App() {
     }
   }, []);
 
+  const handleAudit = useCallback(async () => {
+    setAuditLoading(true);
+    try {
+      const data = await apiFetch('/api/health?full=true');
+      setAuditData(data);
+    } catch (e) {
+      console.error('Audit error:', e);
+    } finally {
+      setAuditLoading(false);
+    }
+  }, []);
+
   return (
     <div className="app">
       {report && (
@@ -1749,7 +1806,7 @@ export default function App() {
         {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
         {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} dataMorphoBase={liquidationsMorphoBase} dataCompoundPolygon={liquidationsCompoundPolygon} dataCompoundArb={liquidationsCompoundArb} dataCompoundOp={liquidationsCompoundOp} dataMorphoPolygon={liquidationsMorphoPolygon} dataMorphoArb={liquidationsMorphoArb} />)}
         {activeTab === 'logs'      && <LogsTab />}
-        {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system} botHealth={botHealth} />)}
+        {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system} botHealth={botHealth} onAudit={handleAudit} auditLoading={auditLoading} auditData={auditData} />)}
       </main>
     </div>
   );
