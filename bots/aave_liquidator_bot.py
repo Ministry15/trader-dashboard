@@ -257,7 +257,7 @@ class AaveLiquidatorBot:
 
         primary_rpc = get_env("ALCHEMY_BASE_URL") or "https://mainnet.base.org"
         # Fallback público para quando o Alchemy faz rate-limit (429)
-        self._rpc_urls: list[str] = [primary_rpc, "https://mainnet.base.org"]
+        self._rpc_urls: list[str] = [primary_rpc, "https://base.drpc.org"]
         self._active_rpc: str = primary_rpc
 
         self.dry_run     : bool  = False
@@ -340,7 +340,7 @@ class AaveLiquidatorBot:
                     return False
             except Exception as exc:
                 logger.debug("Erro ao verificar ligação RPC: %s", exc)
-                if attempt == 0 and self._active_rpc != "https://mainnet.base.org":
+                if attempt == 0 and self._active_rpc != "https://base.drpc.org":
                     if self._switch_rpc(self._active_rpc):
                         continue
                 return False

@@ -41,7 +41,7 @@ ORACLE_ADDRESS        = Web3.to_checksum_address("0xb023e699F5a33916Ea823A16485e
 DATA_PROVIDER_ADDRESS = Web3.to_checksum_address("0x243Aa95cAC2a25651eda86e80bEe66114413c43b")
 POLYGON_CHAIN_ID      = 137
 WMATIC_POLYGON    = "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"  # gas token para custo USD
-_POLYGON_FALLBACK_RPC = "https://polygon-bor-rpc.publicnode.com"
+_POLYGON_FALLBACK_RPC = "https://polygon.drpc.org"
 
 # Bonus de liquidação Aave V3 Polygon (valores conservadores)
 _BONUS: dict[str, float] = {
