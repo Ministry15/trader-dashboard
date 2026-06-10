@@ -135,6 +135,7 @@ orchestrator:
     - "aave_liquidator_op"
     - "aave_liquidator_scroll"
     - "aave_liquidator_linea"
+    - "moonwell_liquidator_base"
     - "compound_liquidator_base"
     - "compound_liquidator_arb"
     - "morpho_liquidator_base"
@@ -288,6 +289,15 @@ bots:
     borrower_scan_blocks: 2000000     # ~1.5 meses @ 2s/bloco; 1ª execução demora ~100s
     flash_loan_contract: ""           # preencher quando contrato for deployado na Linea
     chain_id: 59144                   # Linea mainnet
+
+  moonwell_liquidator_base:
+    poll_seconds: 30
+    health_factor_threshold: 1.05     # shortfall > 0 = liquidável; threshold só para logging
+    min_profit_usd: 10.0              # bonus 10% Moonwell — gas Base ~$0.15
+    max_positions_per_tick: 100
+    borrower_scan_blocks: 500000      # ~12 dias @ 2s/bloco Base
+    flash_loan_contract: "0x05F0a4b7A76F953a169678D3ccA19d2cFD663194"
+    chain_id: 8453
 
   compound_liquidator_base:
     poll_seconds: 30                  # intervalo de scan (s)
