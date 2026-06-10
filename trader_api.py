@@ -965,6 +965,157 @@ def get_health(full: bool = Query(False)):
     }
 
 
+@app.get("/api/speed")
+def get_speed():
+    """Measures per-bot RPC latency, tick intervals and block-position estimates."""
+    import urllib.request as _req, json as _j, time as _t
+
+    _H = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; trader-bot/1.0)",
+    }
+    _PAYLOAD = _j.dumps({"jsonrpc": "2.0", "method": "eth_blockNumber",
+                          "params": [], "id": 1}).encode()
+
+    # ref_ashburn / ref_aws = estimated latency (ms) from us-east-1 to each chain's infra
+    _SC: dict[int, dict] = {
+        8453:   {"name": "Base",      "rpcs": ["https://base-rpc.publicnode.com",        "https://mainnet.base.org"],              "block_ms": 2000, "ref_ashburn": 10,  "ref_aws": 8  },
+        42161:  {"name": "Arbitrum",  "rpcs": ["https://arb1.arbitrum.io/rpc",            "https://arb.drpc.org"],                  "block_ms": 250,  "ref_ashburn": 15,  "ref_aws": 12 },
+        10:     {"name": "Optimism",  "rpcs": ["https://mainnet.optimism.io",             "https://optimism.publicnode.com"],       "block_ms": 2000, "ref_ashburn": 40,  "ref_aws": 35 },
+        534352: {"name": "Scroll",    "rpcs": ["https://rpc.scroll.io"],                                                            "block_ms": 3000, "ref_ashburn": 80,  "ref_aws": 75 },
+        59144:  {"name": "Linea",     "rpcs": ["https://rpc.linea.build",                 "https://linea.drpc.org"],                "block_ms": 3000, "ref_ashburn": 90,  "ref_aws": 85 },
+        137:    {"name": "Polygon",   "rpcs": ["https://rpc.ankr.com/polygon",            "https://polygon.drpc.org"],              "block_ms": 2000, "ref_ashburn": 20,  "ref_aws": 18 },
+        43114:  {"name": "Avalanche", "rpcs": ["https://api.avax.network/ext/bc/C/rpc"],                                           "block_ms": 2000, "ref_ashburn": 30,  "ref_aws": 25 },
+        56:     {"name": "BSC",       "rpcs": ["https://bsc-dataseed.binance.org/",       "https://bsc-dataseed1.defibit.io/"],     "block_ms": 3000, "ref_ashburn": 200, "ref_aws": 195},
+    }
+
+    def _measure_chain(chain_id: int) -> tuple:
+        cc = _SC.get(chain_id, {})
+        for rpc in cc.get("rpcs", []):
+            samples = []
+            for _ in range(2):
+                try:
+                    t0 = _t.perf_counter()
+                    r = _req.Request(rpc, data=_PAYLOAD, headers=_H, method="POST")
+                    with _req.urlopen(r, timeout=4) as resp:
+                        resp.read()
+                    samples.append(int((_t.perf_counter() - t0) * 1000))
+                except Exception:
+                    break
+            if len(samples) >= 1:
+                samples.sort()
+                return chain_id, samples[len(samples) // 2], rpc.split("//")[1].split("/")[0]
+        return chain_id, None, ""
+
+    TICK_RE = re.compile(r"→ tick|tick —|Tick:|tick bloco=", re.IGNORECASE)
+
+    def _tick_interval(bot_id: str) -> int | None:
+        svc = _BOT_SERVICE.get(bot_id, "")
+        lf  = _BOT_LOG_FILTER.get(bot_id)
+        if not svc:
+            return None
+        lines = run_journalctl(svc, since="15min", lines=150)
+        tss = []
+        for line in lines:
+            if lf and lf not in line:
+                continue
+            if TICK_RE.search(line):
+                m = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                if m:
+                    try:
+                        tss.append(datetime.fromisoformat(m.group(1)))
+                    except Exception:
+                        pass
+        if len(tss) < 2:
+            return None
+        intervals = sorted(
+            int((tss[i+1] - tss[i]).total_seconds() * 1000)
+            for i in range(len(tss) - 1)
+            if 0 < (tss[i+1] - tss[i]).total_seconds() < 120
+        )
+        return intervals[len(intervals) // 2] if intervals else None
+
+    # Build minimal bots list
+    cfg      = _load_yaml(_SETTINGS_PATH)
+    bots_cfg = cfg.get("bots", {})
+
+    def _bc(k, ek=""):
+        if ek:
+            v = os.environ.get(ek, "")
+            if v: return v
+        return bots_cfg.get(k, {}).get("flash_loan_contract", "")
+
+    base_c = os.environ.get("FLASH_LOAN_CONTRACT_BASE", "0x843730A2114b8624a36B4D4956aDdc6005bc5c30")
+    _BOTS = [
+        ("aave_base",        "Aave V3 Base",         "Base",      8453),
+        ("aave_polygon",     "Aave V3 Polygon",      "Polygon",   137),
+        ("aave_arb",         "Aave V3 Arbitrum",     "Arbitrum",  42161),
+        ("aave_op",          "Aave V3 Optimism",     "Optimism",  10),
+        ("aave_avax",        "Aave V3 Avalanche",    "Avalanche", 43114),
+        ("aave_scroll",      "Aave V3 Scroll",       "Scroll",    534352),
+        ("aave_linea",       "Aave V3 Linea",        "Linea",     59144),
+        ("compound_base",    "Compound V3 Base",     "Base",      8453),
+        ("compound_polygon", "Compound V3 Polygon",  "Polygon",   137),
+        ("compound_arb",     "Compound V3 Arbitrum", "Arbitrum",  42161),
+        ("compound_op",      "Compound V3 Optimism", "Optimism",  10),
+        ("morpho_base",      "Morpho Blue Base",     "Base",      8453),
+        ("morpho_polygon",   "Morpho Blue Polygon",  "Polygon",   137),
+        ("morpho_arb",       "Morpho Blue Arbitrum", "Arbitrum",  42161),
+        ("moonwell_base",    "Moonwell Base",        "Base",      8453),
+        ("ionic_base",       "Ionic Base",           "Base",      8453),
+        ("venus_bsc",        "Venus BSC",            "BSC",       56),
+    ]
+
+    unique_chains = list({cid for _, _, _, cid in _BOTS})
+
+    lat_map: dict[int, tuple] = {}
+    tick_map: dict[str, int | None] = {}
+
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        chain_futs = {ex.submit(_measure_chain, cid): cid for cid in unique_chains}
+        tick_futs  = {ex.submit(_tick_interval, bid): bid for bid, *_ in _BOTS}
+        for fut, cid in chain_futs.items():
+            try:
+                _, lat, host = fut.result(timeout=15)
+                lat_map[cid] = (lat, host)
+            except Exception:
+                lat_map[cid] = (None, "")
+        for fut, bid in tick_futs.items():
+            try:
+                tick_map[bid] = fut.result(timeout=20)
+            except Exception:
+                tick_map[bid] = None
+
+    rows = []
+    for bid, name, chain, cid in _BOTS:
+        cc       = _SC.get(cid, {})
+        lat, host = lat_map.get(cid, (None, ""))
+        tick     = tick_map.get(bid)
+        pos      = round(lat / cc["block_ms"] * 100, 1) if lat and cc.get("block_ms") else None
+        rows.append({
+            "id":           bid,
+            "name":         name,
+            "chain":        chain,
+            "chain_id":     cid,
+            "connection":   "websocket" if bid in _BOT_WS else "http_polling",
+            "rpc_latency":  lat,
+            "rpc_host":     host,
+            "tick_interval": tick,
+            "block_ms":     cc.get("block_ms"),
+            "position_pct": pos,
+            "ref_ashburn":  cc.get("ref_ashburn"),
+            "ref_aws":      cc.get("ref_aws"),
+            "vs_ashburn":   (lat - cc["ref_ashburn"]) if lat is not None and cc.get("ref_ashburn") else None,
+            "vs_aws":       (lat - cc["ref_aws"])     if lat is not None and cc.get("ref_aws")     else None,
+        })
+
+    # Sort by rpc_latency descending (None at the end), then by name
+    rows.sort(key=lambda x: (x["rpc_latency"] is None, -(x["rpc_latency"] or 0), x["name"]))
+
+    return {"bots": rows, "timestamp": datetime.utcnow().isoformat()}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
