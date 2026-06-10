@@ -1,8 +1,8 @@
 {
-  "buildCommand": "npm run build",
+  "buildCommand": "vite build",
+  "installCommand": "npm install",
   "outputDirectory": "dist",
   "framework": "vite",
-  "public": true,
   "rewrites": [
     {
       "source": "/((?!api/).*)",
