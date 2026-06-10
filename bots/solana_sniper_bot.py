@@ -161,10 +161,14 @@ class SolanaSniperBot:
             return []
 
     def _fetch_raydium(self) -> list[dict]:
+        _MAX_BYTES = 8 * 1024 * 1024  # 8 MB — resposta completa pode ter 100MB+
         try:
-            resp = requests.get(_RAYDIUM_URL, timeout=(5, 10))
+            resp = requests.get(_RAYDIUM_URL, timeout=(5, 10), stream=True)
             resp.raise_for_status()
-            raw = resp.json()
+            content = resp.raw.read(_MAX_BYTES, decode_content=True)
+            if not content:
+                return []
+            raw = __import__("json").loads(content)
             pools = raw if isinstance(raw, list) else raw.get("data", [])
             return [self._norm_raydium(p) for p in pools[:30]]
         except Exception as exc:
