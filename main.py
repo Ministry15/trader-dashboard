@@ -37,6 +37,8 @@ from bots.morpho_liquidator_polygon_bot import MorphoLiquidatorPolygonBot
 from bots.aave_liquidator_scroll_bot import AaveLiquidatorScrollBot
 from bots.aave_liquidator_bot import AaveLiquidatorBot
 from bots.aave_liquidator_polygon_bot import AaveLiquidatorPolygonBot
+from bots.ionic_liquidator_base_bot import IonicLiquidatorBaseBot
+from bots.venus_liquidator_bsc_bot import VenusLiquidatorBscBot
 from bots.arbitrage_bot import ArbitrageBot
 from bots.dca_bot import DCABot
 from bots.funding_rate_bot import FundingRateBot
@@ -99,6 +101,10 @@ BOT_REGISTRY = {
                               lambda s: int(s.get("bots", {}).get("morpho_liquidator_arb", {}).get("poll_seconds", 30))),
     "morpho_liquidator_polygon": (MorphoLiquidatorPolygonBot, "tick",
                                   lambda s: int(s.get("bots", {}).get("morpho_liquidator_polygon", {}).get("poll_seconds", 1))),
+    "ionic_liquidator_base": (IonicLiquidatorBaseBot, "tick",
+                              lambda s: int(s.get("bots", {}).get("ionic_liquidator_base", {}).get("poll_seconds", 1))),
+    "venus_liquidator_bsc": (VenusLiquidatorBscBot, "tick",
+                             lambda s: int(s.get("bots", {}).get("venus_liquidator_bsc", {}).get("poll_seconds", 3))),
 }
 
 

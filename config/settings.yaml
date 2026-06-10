@@ -143,6 +143,8 @@ orchestrator:
     - "morpho_liquidator_base"
     - "morpho_liquidator_arb"
     - "morpho_liquidator_polygon"
+    - "ionic_liquidator_base"
+    - "venus_liquidator_bsc"
 
 # ------------------------------------------------------------------------------
 # BOTS — parâmetros por estratégia
@@ -357,6 +359,22 @@ bots:
     max_positions_per_tick: 100
     borrower_scan_blocks: 200000      # ~5.5h @ 2s/bloco Polygon
     chain_id: 137                     # Polygon mainnet
+
+  ionic_liquidator_base:
+    poll_seconds: 1                   # WS-driven; 2s/bloco Base
+    min_profit_usd: 10.0              # bonus 8% Ionic; gas Base ~$0.18
+    max_positions_per_tick: 100
+    borrower_scan_blocks: 500000      # ~12 dias @ 2s/bloco Base
+    flash_loan_contract: ""           # reutiliza FLASH_LOAN_CONTRACT_BASE do .env
+    chain_id: 8453
+
+  venus_liquidator_bsc:
+    poll_seconds: 3                   # BSC ~3s/bloco
+    min_profit_usd: 15.0              # sem flash loan — precisa margem para cobrir gas
+    max_positions_per_tick: 100
+    borrower_scan_blocks: 500000      # ~18 dias @ 3s/bloco BSC
+    flash_loan_contract: ""           # a definir quando contrato BSC for deployado
+    chain_id: 56                      # BSC mainnet (dry_run até ter flash contract)
 
 # ------------------------------------------------------------------------------
 # NOTIFICAÇÕES
