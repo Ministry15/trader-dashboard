@@ -8,7 +8,7 @@ import {
   Activity, TrendingUp, TrendingDown, Zap, Grid, DollarSign,
   Server, FileText, RefreshCw, AlertTriangle,
   CheckCircle, XCircle, Cpu, HardDrive, MemoryStick,
-  BarChart2, Target, X, Download, Gauge
+  BarChart2, Target, X, Download, Gauge, Search
 } from 'lucide-react';
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -1362,6 +1362,170 @@ function LogsTab() {
 }
 
 // ─── SPEED ────────────────────────────────────────────────────────────────────
+// ─── Oportunidades Tab ────────────────────────────────────────────────────────
+function OpportunitiesTab({ data, onFetch, loading, window: win, onWindow }) {
+  const events  = data?.events  ?? [];
+  const summary = data?.summary ?? {};
+
+  const CHAIN_COLOR = { Base: '#2c7be5', Arbitrum: '#28a8e0', Optimism: '#ff0420', Polygon: '#8247e5' };
+  const PROTO_COLOR = { 'Aave V3': '#b6509e', 'Morpho Blue': '#1a4de3', 'Compound V3': '#00d395' };
+
+  function capAddr(a) {
+    if (!a || a.length < 10) return a;
+    return a.slice(0, 6) + '…' + a.slice(-4);
+  }
+  function explorerUrl(chain, tx) {
+    const base = { Base: 'https://basescan.org', Arbitrum: 'https://arbiscan.io',
+                   Optimism: 'https://optimistic.ethscan.io', Polygon: 'https://polygonscan.com' };
+    return `${base[chain] ?? 'https://etherscan.io'}/tx/${tx}`;
+  }
+  function fmtProfit(p) {
+    if (p == null) return '?';
+    return '$' + p.toFixed(2);
+  }
+
+  const pLost = summary.profit_lost ?? 0;
+  const pCap  = summary.profit_captured ?? 0;
+  const pTot  = pLost + pCap;
+  const captureRate = pTot > 0 ? Math.round(pCap / pTot * 100) : 0;
+
+  return (
+    <div>
+      {/* Summary bar */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 14 }}>
+        {[
+          { label: 'Total Liquidações', val: summary.total ?? '—', color: 'var(--accent)' },
+          { label: 'Capturado por Nós', val: summary.by_us != null ? `${summary.by_us}  ($${pCap.toFixed(2)})` : '—', color: 'var(--green)' },
+          { label: 'Perdido Competitors', val: summary.by_competitor != null ? `${summary.by_competitor}  ($${pLost.toFixed(2)})` : '—', color: 'var(--red)' },
+          { label: 'Taxa de Captura', val: data ? `${captureRate}%` : '—', color: captureRate > 30 ? 'var(--green)' : captureRate > 10 ? 'var(--yellow)' : 'var(--red)' },
+        ].map(({ label, val, color }) => (
+          <div key={label} className="panel" style={{ padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color }}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Controls */}
+      <div className="panel mb">
+        <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>LIQUIDAÇÕES ON-CHAIN — {data ? `${events.length} EVENTOS` : 'NÃO CARREGADO'}</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {['1d', '2d', '7d'].map(w => (
+              <button key={w}
+                className="btn"
+                style={{ padding: '3px 10px', opacity: win === w ? 1 : 0.5, fontWeight: win === w ? 700 : 400 }}
+                onClick={() => onWindow(w)}>
+                {w === '1d' ? 'Hoje' : w === '2d' ? 'Ontem' : '7 dias'}
+              </button>
+            ))}
+            <button
+              className={`btn${loading ? ' spin' : ''}`}
+              onClick={onFetch}
+              disabled={loading}
+              style={{ marginLeft: 4 }}
+            >
+              {loading ? <><RefreshCw size={11} /> carregando...</> : <><Search size={11} /> PESQUISAR</>}
+            </button>
+          </div>
+        </div>
+
+        {!data && !loading && (
+          <div style={{ padding: '30px', textAlign: 'center', color: '#666', fontSize: 12 }}>
+            Clique em PESQUISAR para carregar liquidações on-chain nas últimas {win === '1d' ? '24h' : win === '2d' ? '48h' : '7 dias'}.
+          </div>
+        )}
+
+        {loading && (
+          <div style={{ padding: '30px', textAlign: 'center', color: '#888', fontSize: 12 }}>
+            <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> A consultar {13} contratos em {4} chains...
+          </div>
+        )}
+
+        {data && !loading && events.length === 0 && (
+          <div style={{ padding: '20px', textAlign: 'center', color: '#666', fontSize: 12 }}>
+            Nenhuma liquidação encontrada no período seleccionado.
+          </div>
+        )}
+
+        {data && events.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="data-table" style={{ fontSize: 11 }}>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Protocolo</th>
+                  <th>Chain</th>
+                  <th>Dívida</th>
+                  <th>Lucro Est.</th>
+                  <th>Liquidador</th>
+                  <th>TX</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((e, i) => {
+                  const won = e.by_us;
+                  const rowStyle = { borderLeft: `3px solid ${won ? 'var(--green)' : 'var(--red)'}` };
+                  return (
+                    <tr key={i} style={rowStyle}>
+                      <td>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 7px', borderRadius: 3, fontSize: 10,
+                          fontWeight: 700, letterSpacing: 0.5,
+                          background: won ? 'rgba(0,200,80,0.15)' : 'rgba(220,50,50,0.15)',
+                          color: won ? 'var(--green)' : 'var(--red)',
+                        }}>
+                          {won ? '✓ GANHÁMOS' : '✗ PERDEMOS'}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ color: PROTO_COLOR[e.protocol] ?? '#aaa', fontWeight: 600 }}>
+                          {e.protocol}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ color: CHAIN_COLOR[e.chain] ?? '#aaa' }}>{e.chain}</span>
+                      </td>
+                      <td>
+                        <span style={{ color: '#ddd' }}>
+                          {e.debt_usd != null ? `$${e.debt_usd.toFixed(2)}` : '—'}
+                        </span>
+                        {' '}
+                        <span style={{ color: '#666', fontSize: 10 }}>{e.debt_asset}</span>
+                      </td>
+                      <td style={{ color: won ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                        {fmtProfit(e.profit_est)}
+                      </td>
+                      <td style={{ fontFamily: 'monospace', color: won ? 'var(--green)' : '#aaa' }}>
+                        {capAddr(e.liquidator)}
+                      </td>
+                      <td>
+                        <a href={explorerUrl(e.chain, e.tx_hash)} target="_blank" rel="noreferrer"
+                           style={{ color: 'var(--accent)', textDecoration: 'none', fontFamily: 'monospace', fontSize: 10 }}>
+                          {e.tx_hash ? e.tx_hash.slice(0, 10) + '…' : '—'}
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {data && (
+          <div style={{ padding: '8px 14px', borderTop: '1px solid #222', fontSize: 10, color: '#555' }}>
+            Protocolos: Aave V3 (Base/Arb/Op/Polygon) · Morpho Blue (Base/Arb) · Compound V3 (Base/Arb/Op/Polygon)
+            {' · '}ETH: ${(data.eth_price ?? 0).toFixed(0)}
+            {' · '}
+            {data.timestamp ? new Date(data.timestamp + 'Z').toLocaleTimeString() : ''}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SpeedTab({ data, onMeasure, loading }) {
   function latColor(v) {
     if (v == null) return '#555';
@@ -1752,8 +1916,9 @@ const TABS = [
   { id: 'flash-arb',  label: 'Flash Arb',  icon: Zap        },
   { id: 'liquidations', label: 'Liquidations', icon: Activity },
   { id: 'logs',       label: 'Logs',       icon: FileText   },
-  { id: 'system',     label: 'System',     icon: Server     },
-  { id: 'speed',      label: 'Speed',      icon: Gauge      },
+  { id: 'system',        label: 'System',        icon: Server  },
+  { id: 'speed',         label: 'Speed',         icon: Gauge   },
+  { id: 'opportunities', label: 'Oportunidades', icon: Search  },
 ];
 
 export default function App() {
@@ -1791,6 +1956,9 @@ export default function App() {
   const [auditData,                   setAuditData]                   = useState(null);
   const [speedData,                   setSpeedData]                   = useState(null);
   const [speedLoading,                setSpeedLoading]                = useState(false);
+  const [oppData,                     setOppData]                     = useState(null);
+  const [oppLoading,                  setOppLoading]                  = useState(false);
+  const [oppWindow,                   setOppWindow]                   = useState('1d');
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -1892,6 +2060,24 @@ export default function App() {
     }
   }, []);
 
+  const handleFetchOpportunities = useCallback(async (w) => {
+    const win = w || oppWindow;
+    setOppLoading(true);
+    try {
+      const data = await apiFetch(`/api/opportunities?window=${win}`);
+      setOppData(data);
+    } catch (e) {
+      console.error('Opportunities error:', e);
+    } finally {
+      setOppLoading(false);
+    }
+  }, [oppWindow]);
+
+  const handleOppWindow = useCallback((w) => {
+    setOppWindow(w);
+    setOppData(null);
+  }, []);
+
   return (
     <div className="app">
       {report && (
@@ -1956,7 +2142,8 @@ export default function App() {
         {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} dataMorphoBase={liquidationsMorphoBase} dataCompoundPolygon={liquidationsCompoundPolygon} dataCompoundArb={liquidationsCompoundArb} dataCompoundOp={liquidationsCompoundOp} dataMorphoPolygon={liquidationsMorphoPolygon} dataMorphoArb={liquidationsMorphoArb} />)}
         {activeTab === 'logs'      && <LogsTab />}
         {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system} botHealth={botHealth} onAudit={handleAudit} auditLoading={auditLoading} auditData={auditData} />)}
-        {activeTab === 'speed'    && <SpeedTab data={speedData} onMeasure={handleMeasureSpeed} loading={speedLoading} />}
+        {activeTab === 'speed'         && <SpeedTab data={speedData} onMeasure={handleMeasureSpeed} loading={speedLoading} />}
+        {activeTab === 'opportunities' && <OpportunitiesTab data={oppData} onFetch={() => handleFetchOpportunities(oppWindow)} loading={oppLoading} window={oppWindow} onWindow={handleOppWindow} />}
       </main>
     </div>
   );

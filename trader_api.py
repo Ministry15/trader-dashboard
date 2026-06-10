@@ -1116,6 +1116,243 @@ def get_speed():
     return {"bots": rows, "timestamp": datetime.utcnow().isoformat()}
 
 
+# ─── OPPORTUNITIES ENDPOINT ───────────────────────────────────────────────────
+
+_OUR_WALLET_LC = "0xb6e646fa7a4e1ce48510bd3bcd756c00cbdfd434"
+
+_TOPIC_AAVE_LIQ   = "0xe413a321e8681d831f4dbccbca790d2952b56f977908e45be37335533e005286"
+_TOPIC_MORPHO_LIQ = "0xa4946ede45d0c6f06a0f5ce92c9ad3b4751452d2fe0e25010783bcab57a67e41"
+_TOPIC_CMPD_ABS   = "0x1547a878dc89ad3c367b6338b4be6a65a5dd74fb77ae044da1e8747ef1f4f62f"
+
+_TOKEN_META: dict[str, tuple] = {
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": ("USDC",   6),
+    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": ("USDbC",  6),
+    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb": ("DAI",   18),
+    "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2": ("USDT",   6),
+    "0xaf88d065e77c8cc2239327c5edb3a432268e5831": ("USDC",   6),
+    "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8": ("USDC.e", 6),
+    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": ("DAI",   18),
+    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": ("USDT",   6),
+    "0x7f5c764cbc14f9669b88837ca1490cca17c31607": ("USDC.e", 6),
+    "0x0b2c639c533813f4aa9d7837caf62653d097ff85": ("USDC",   6),
+    "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58": ("USDT",   6),
+    "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": ("USDC.e", 6),
+    "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": ("USDC",   6),
+    "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": ("USDT",   6),
+    "0x4200000000000000000000000000000000000006": ("WETH",  18),
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": ("WETH",  18),
+    "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": ("WETH",  18),
+    "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": ("cbBTC",  8),
+    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": ("cbETH", 18),
+    "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452": ("wstETH",18),
+}
+_STABLES = {"USDC", "USDbC", "USDT", "DAI", "USDC.e"}
+
+# (protocol, chain_label, chain_id, rpc_url, contract, topic, chunk_blocks, day_blocks)
+_SCAN_PROTOCOLS = [
+    ("Aave V3",     "Base",     8453,  "https://mainnet.base.org",               "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5", _TOPIC_AAVE_LIQ,    5000,  43200),
+    ("Aave V3",     "Arbitrum", 42161, "https://arb1.arbitrum.io/rpc",           "0x794a61358D6845594F94dc1DB02A252b5b4814aD", _TOPIC_AAVE_LIQ,   50000, 345600),
+    ("Aave V3",     "Optimism", 10,    "https://mainnet.optimism.io",            "0x794a61358D6845594F94dc1DB02A252b5b4814aD", _TOPIC_AAVE_LIQ,    5000,  43200),
+    ("Aave V3",     "Polygon",  137,   "https://rpc-mainnet.matic.quiknode.pro", "0x794a61358D6845594F94dc1DB02A252b5b4814aD", _TOPIC_AAVE_LIQ,   43200,  43200),
+    ("Morpho Blue", "Base",     8453,  "https://mainnet.base.org",               "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb", _TOPIC_MORPHO_LIQ,  5000,  43200),
+    ("Morpho Blue", "Arbitrum", 42161, "https://arb1.arbitrum.io/rpc",           "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb", _TOPIC_MORPHO_LIQ, 50000, 345600),
+    ("Compound V3", "Base",     8453,  "https://mainnet.base.org",               "0xb125E6687d4313864e53df431d5425969c15Eb2F", _TOPIC_CMPD_ABS,    5000,  43200),
+    ("Compound V3", "Arbitrum", 42161, "https://arb1.arbitrum.io/rpc",           "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA", _TOPIC_CMPD_ABS,   50000, 345600),
+    ("Compound V3", "Arbitrum", 42161, "https://arb1.arbitrum.io/rpc",           "0xd98Be00b5D27fc98112BdE293e487f8D4cA57d07", _TOPIC_CMPD_ABS,   50000, 345600),
+    ("Compound V3", "Optimism", 10,    "https://mainnet.optimism.io",            "0x2e44e174f7D53F0212823acC11C01A11d58c5bCB", _TOPIC_CMPD_ABS,    5000,  43200),
+    ("Compound V3", "Optimism", 10,    "https://mainnet.optimism.io",            "0x995E394b8B2437aC8Ce61Ee0bC610D617962B214", _TOPIC_CMPD_ABS,    5000,  43200),
+    ("Compound V3", "Polygon",  137,   "https://rpc-mainnet.matic.quiknode.pro", "0xF25212E676D1F7F89Cd72fFEe66158f541246445", _TOPIC_CMPD_ABS,   43200,  43200),
+    ("Compound V3", "Polygon",  137,   "https://rpc-mainnet.matic.quiknode.pro", "0xaeB318360f27748Acb200CE616E389A6C9409a07", _TOPIC_CMPD_ABS,   43200,  43200),
+]
+
+_OPP_CACHE: dict = {}  # window → {"data": ..., "ts": float}
+
+
+def _opp_rpc(rpc_url: str, method: str, params: list) -> dict:
+    import urllib.request as _u, json as _j
+    req = _u.Request(rpc_url,
+        data=_j.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": "TraderDashboard/2"},
+        method="POST")
+    try:
+        with _u.urlopen(req, timeout=15) as r:
+            return _j.loads(r.read())
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _eth_price_usd() -> float:
+    import urllib.request as _u, json as _j
+    cache = getattr(_eth_price_usd, "_c", (0.0, 0.0))
+    if time.time() - cache[1] < 300:
+        return cache[0]
+    for url, key in [
+        ("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd", ("ethereum", "usd")),
+        ("https://min-api.cryptocompare.com/data/price?fsym=ETH&tsyms=USD", ("USD",)),
+    ]:
+        try:
+            req = _u.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with _u.urlopen(req, timeout=5) as r:
+                d = _j.loads(r.read())
+                price = d[key[0]][key[1]] if len(key) == 2 else d[key[0]]
+                _eth_price_usd._c = (float(price), time.time())
+                return float(price)
+        except Exception:
+            pass
+    return 3000.0
+
+
+def _token_usd(raw: int, addr: str, eth_px: float) -> float | None:
+    meta = _TOKEN_META.get(addr.lower())
+    if not meta:
+        return None
+    sym, dec = meta
+    amt = raw / (10 ** dec)
+    if sym in _STABLES:
+        return round(amt, 2)
+    if sym in ("WETH", "cbETH", "wstETH"):
+        return round(amt * eth_px, 2)
+    if sym == "cbBTC":
+        return round(amt * 100_000, 2)
+    return None
+
+
+def _morpho_debt_usd(raw: int, eth_px: float) -> tuple[float | None, str]:
+    """Heuristic USD estimate for Morpho repaidAssets (token unknown)."""
+    if raw > 10 ** 15:
+        return round(raw / 10**18 * eth_px, 2), "WETH~"
+    if raw < 10 ** 12:
+        return round(raw / 10**6, 2), "USDC~"
+    return None, "?"
+
+
+def _chunked_logs(rpc_url: str, from_b: int, to_b: int, chunk: int,
+                  addr: str, topic: str) -> list:
+    ranges = [(from_b + i, min(from_b + i + chunk - 1, to_b))
+               for i in range(0, max(to_b - from_b, 1), chunk)]
+    def _fetch(fb_tb: tuple) -> list:
+        fb, tb = fb_tb
+        r = _opp_rpc(rpc_url, "eth_getLogs", [{"fromBlock": hex(fb), "toBlock": hex(tb),
+            "address": addr, "topics": [topic]}])
+        return r.get("result") or []
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        results: list = []
+        for evts in ex.map(_fetch, ranges):
+            results.extend(evts)
+    return results
+
+
+def _scan_protocol(proto: tuple, days: int, eth_px: float) -> list[dict]:
+    protocol, chain, chain_id, rpc_url, contract, topic, chunk, day_blocks = proto
+    total_blocks = day_blocks * days
+
+    bn_res = _opp_rpc(rpc_url, "eth_blockNumber", [])
+    if "error" in bn_res or "result" not in bn_res:
+        return []
+    try:
+        cur_block = int(bn_res["result"], 16)
+    except Exception:
+        return []
+
+    from_b = cur_block - total_blocks
+    logs = _chunked_logs(rpc_url, from_b, cur_block, chunk, contract, topic)
+
+    events: list[dict] = []
+    for log in logs:
+        try:
+            if topic == _TOPIC_AAVE_LIQ:
+                data = log["data"][2:]
+                debt_raw   = int(data[0:64], 16)
+                liquidator = "0x" + data[152:192]
+                debt_addr  = "0x" + log["topics"][2][26:]
+                debt_usd   = _token_usd(debt_raw, debt_addr, eth_px)
+                meta = _TOKEN_META.get(debt_addr.lower(), ("?", 0))
+                debt_sym = meta[0]
+                profit_est = round(debt_usd * 0.05, 2) if debt_usd else None
+
+            elif topic == _TOPIC_MORPHO_LIQ:
+                liquidator = "0x" + log["topics"][2][26:]
+                data = log["data"][2:]
+                repaid_raw = int(data[0:64], 16)
+                debt_usd, debt_sym = _morpho_debt_usd(repaid_raw, eth_px)
+                debt_raw   = repaid_raw
+                profit_est = round(debt_usd * 0.05, 2) if debt_usd else None
+
+            elif topic == _TOPIC_CMPD_ABS:
+                liquidator = "0x" + log["topics"][1][26:]
+                data = log["data"][2:]
+                # basePaidOut (slot0), usdValue (slot1 × 10^8)
+                usd_raw = int(data[64:128], 16)
+                debt_usd = round(usd_raw / 10**8, 2) if usd_raw > 0 else None
+                debt_raw = int(data[0:64], 16)
+                debt_sym = "USD"
+                profit_est = round(debt_usd * 0.05, 2) if debt_usd else None
+            else:
+                continue
+
+            events.append({
+                "protocol":    protocol,
+                "chain":       chain,
+                "chain_id":    chain_id,
+                "debt_asset":  debt_sym,
+                "debt_raw":    debt_raw,
+                "debt_usd":    debt_usd,
+                "profit_est":  profit_est,
+                "liquidator":  liquidator,
+                "by_us":       liquidator.lower() == _OUR_WALLET_LC,
+                "tx_hash":     log["transactionHash"],
+                "block":       int(log["blockNumber"], 16),
+            })
+        except Exception:
+            continue
+    return events
+
+
+@app.get("/api/opportunities")
+def get_opportunities(window: str = Query("1d")):
+    allowed = {"1d": 1, "2d": 2, "7d": 7}
+    days = allowed.get(window, 1)
+    cache_entry = _OPP_CACHE.get(window, {})
+    if cache_entry and time.time() - cache_entry.get("ts", 0) < 300:
+        return cache_entry["data"]
+
+    eth_px = _eth_price_usd()
+
+    all_events: list[dict] = []
+    with ThreadPoolExecutor(max_workers=13) as ex:
+        futs = [ex.submit(_scan_protocol, p, days, eth_px) for p in _SCAN_PROTOCOLS]
+        for fut in futs:
+            try:
+                all_events.extend(fut.result(timeout=40))
+            except Exception:
+                pass
+
+    all_events.sort(key=lambda e: e["block"], reverse=True)
+
+    total  = len(all_events)
+    by_us  = [e for e in all_events if e["by_us"]]
+    by_cmp = [e for e in all_events if not e["by_us"]]
+
+    def _sum_profit(lst: list) -> float:
+        return round(sum(e["profit_est"] for e in lst if e.get("profit_est") is not None), 2)
+
+    result = {
+        "window":   window,
+        "eth_price": eth_px,
+        "summary": {
+            "total":            total,
+            "by_us":            len(by_us),
+            "by_competitor":    len(by_cmp),
+            "profit_captured":  _sum_profit(by_us),
+            "profit_lost":      _sum_profit(by_cmp),
+        },
+        "events":    all_events,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    _OPP_CACHE[window] = {"data": result, "ts": time.time()}
+    return result
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
