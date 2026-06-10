@@ -3,7 +3,7 @@
 Lógica idêntica ao compound_liquidator_arb_bot.py, adaptada para Optimism:
   - Dois contratos Comet (USDC e USDT) varridos no mesmo tick
   - chain='compound_op', chain_id=10
-  - RPC: OPTIMISM_RPC_URL do .env (fallback: https://mainnet.optimism.io)
+  - RPC: OPTIMISM_RPC_URL do .env (fallback: https://optimism.llamarpc.com)
   - Gas estimado em ETH (token nativo do Optimism)
   - min_profit_usd=20.0
 
@@ -12,7 +12,7 @@ Contratos Compound V3 Optimism (chain 10):
   Comet USDT: 0x995E394b8B2437aC8Ce61Ee0bC610D617962B214
   Colaterais típicos: WETH, WBTC, OP, wstETH, rETH
 
-RPC: OPTIMISM_RPC_URL do .env (fallback: https://mainnet.optimism.io)
+RPC: OPTIMISM_RPC_URL do .env (fallback: https://optimism.llamarpc.com)
 Logs: /opt/crypto_bsc/logs/compound_op.log + journal (get_logger)
 """
 from __future__ import annotations
@@ -49,7 +49,7 @@ OP_CHAIN_ID         = 10
 _PRICE_DECIMALS     = 8         # getPrice retorna USD × 1e8
 _CF_SCALE           = 1e18      # collateralFactor em 1e18
 _GAS_UNITS          = 500_000   # absorb() estimativa conservadora
-_OP_FALLBACK_RPC    = "https://mainnet.optimism.io"
+_OP_FALLBACK_RPC    = "https://optimism.llamarpc.com"
 
 # WETH Optimism — usado para estimar preço do gas em USD
 _WETH_ADDRESS       = "0x4200000000000000000000000000000000000006"

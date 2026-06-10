@@ -42,8 +42,8 @@ BASE_CHAIN_ID     = 8453
 _ORACLE_SCALE     = 10 ** 36   # Morpho oracles: price × 1e36 (já inclui decimal scaling)
 _LLTV_SCALE       = 10 ** 18   # LLTV em WAD
 _GAS_UNITS        = 350_000    # liquidate() na Base
-_FALLBACK_RPC_1   = "https://base-rpc.publicnode.com"
-_FALLBACK_RPC_2   = "https://mainnet.base.org"
+_FALLBACK_RPC_1   = "https://1rpc.io/base"
+_FALLBACK_RPC_2   = "https://base.publicnode.com"
 
 _HF_LIQUIDATABLE = 1.0      # Morpho: só liquidável quando HF < 1.0
 _DEBT_MIN_USD    = 500.0

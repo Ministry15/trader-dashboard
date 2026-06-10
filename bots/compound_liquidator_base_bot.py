@@ -50,7 +50,11 @@ _PRICE_DECIMALS   = 8          # getPrice retorna USD × 1e8
 _CF_SCALE         = 1e18       # borrowCollateralFactor / liquidateCollateralFactor em 1e18
 _GAS_UNITS        = 500_000    # absorb() + buyCollateral() estimativa
 _ABSORB_DISCOUNT  = 0.05       # desconto conservador de 5% no buyCollateral
-_BASE_FALLBACK_RPC = "https://base-rpc.publicnode.com"
+_BASE_FALLBACK_RPC  = "https://1rpc.io/base"
+_BASE_EXTRA_RPCS    = [
+    "https://base.publicnode.com",
+    "https://base.drpc.org",
+]
 
 _HF_LIQUIDATABLE = 1.0
 _BLACKLIST_FAILS  = 3
@@ -202,7 +206,10 @@ class CompoundLiquidatorBaseBot:
         self.cfg = self.settings.get("bots", {}).get("compound_liquidator_base", {})
 
         primary_rpc = get_env("ALCHEMY_BASE_URL") or _BASE_FALLBACK_RPC
-        self._rpc_urls: list[str] = [primary_rpc, _BASE_FALLBACK_RPC]
+        _seen = {primary_rpc, _BASE_FALLBACK_RPC}
+        self._rpc_urls: list[str] = [primary_rpc, _BASE_FALLBACK_RPC] + [
+            u for u in _BASE_EXTRA_RPCS if u not in _seen
+        ]
         self._active_rpc: str = primary_rpc
 
         self.dry_run      : bool  = False
@@ -305,31 +312,38 @@ class CompoundLiquidatorBaseBot:
             return 0.01   # Base: muito barato (~0.001-0.01 Gwei)
 
     def _load_assets(self) -> list[dict]:
-        """Cache de asset info com preços (TTL: 5 min)."""
+        """Cache de asset info com preços (TTL: 5 min). Tenta todos os RPCs em caso de 429."""
         now = time.time()
         if self._assets and now - self._assets_ts < 300:
             return self._assets
-        try:
-            n = self.comet.functions.numAssets().call()
-            assets = []
-            for i in range(n):
-                info = self.comet.functions.getAssetInfo(i).call()
-                price_raw = self.comet.functions.getPrice(info[2]).call()
-                assets.append({
-                    "asset":          info[1],
-                    "price_feed":     info[2],
-                    "scale":          info[3],
-                    "borrow_cf":      info[4] / _CF_SCALE,
-                    "liquidate_cf":   info[5] / _CF_SCALE,
-                    "liquidation_f":  info[6] / _CF_SCALE,
-                    "price_usd":      price_raw / 10 ** _PRICE_DECIMALS,
-                    "discount":       1.0 - info[6] / _CF_SCALE,
-                })
-            self._assets    = assets
-            self._assets_ts = now
-            logger.debug("CompoundBase: %d assets carregados", len(assets))
-        except Exception as exc:
-            logger.warning("CompoundBase: falha ao carregar assets: %s", exc)
+        rpcs_to_try = [self._active_rpc] + [u for u in self._rpc_urls if u != self._active_rpc]
+        for rpc_url in rpcs_to_try:
+            try:
+                w3_tmp   = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 20}))
+                comet_tmp = w3_tmp.eth.contract(address=COMET_ADDRESS, abi=_COMET_ABI)
+                n = comet_tmp.functions.numAssets().call()
+                assets = []
+                for i in range(n):
+                    info      = comet_tmp.functions.getAssetInfo(i).call()
+                    price_raw = comet_tmp.functions.getPrice(info[2]).call()
+                    assets.append({
+                        "asset":          info[1],
+                        "price_feed":     info[2],
+                        "scale":          info[3],
+                        "borrow_cf":      info[4] / _CF_SCALE,
+                        "liquidate_cf":   info[5] / _CF_SCALE,
+                        "liquidation_f":  info[6] / _CF_SCALE,
+                        "price_usd":      price_raw / 10 ** _PRICE_DECIMALS,
+                        "discount":       1.0 - info[6] / _CF_SCALE,
+                    })
+                self._assets    = assets
+                self._assets_ts = now
+                logger.debug("CompoundBase: %d assets carregados via %s",
+                             len(assets), rpc_url.split("//")[-1].split("/")[0])
+                return self._assets
+            except Exception as exc:
+                logger.warning("CompoundBase: falha ao carregar assets via %s: %s",
+                               rpc_url.split("//")[-1].split("/")[0], exc)
         return self._assets
 
     # ── descoberta de borrowers ───────────────────────────────────────────────
@@ -435,6 +449,13 @@ class CompoundLiquidatorBaseBot:
             if not is_liq and pseudo_hf >= self.hf_threshold:
                 return None
 
+            if not is_liq and pseudo_hf < _HF_LIQUIDATABLE:
+                logger.warning(
+                    "CompoundBase: DISCREPÂNCIA %s — HF local=%.4f<1.0 mas isLiquidatable()=False"
+                    " debt=$%.2f col=$%.2f",
+                    cs_addr[:10] + "…", pseudo_hf, debt_usd, collateral_usd,
+                )
+
             # 6. Gas
             gas_usd = _GAS_UNITS * self._gas_price_gwei() * 1e-9 * self._eth_price()
 
@@ -533,9 +554,9 @@ class CompoundLiquidatorBaseBot:
         self._scan_borrowers()
         self._load_assets()
 
-        _pk    = get_env("BSC_PRIVATE_KEY") or ""
-        _acct  = self.w3.eth.account.from_key(_pk)
-        _nonce = self.w3.eth.get_transaction_count(_acct.address, 'pending')
+        _pk   = get_env("BSC_PRIVATE_KEY") or ""
+        _acct = self.w3.eth.account.from_key(_pk)
+        _nonce: int | None = None
         if not self.dry_run:
             _bal_wei = self.w3.eth.get_balance(_acct.address)
             if _bal_wei < Web3.to_wei(0.005, 'ether'):
@@ -584,6 +605,8 @@ class CompoundLiquidatorBaseBot:
                         logger.debug("CompoundBase: %s em cooldown (%.0fs)",
                                      borrower[:10] + "…", _until - _now_tick)
                     else:
+                        if _nonce is None:
+                            _nonce = self.w3.eth.get_transaction_count(_acct.address, 'pending')
                         tx_hash = self._execute_live(opp, nonce=_nonce)
                         if tx_hash is None:
                             _cnt = self._fail_counts.get(_b_low, 0) + 1
