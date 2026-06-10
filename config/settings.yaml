@@ -137,9 +137,12 @@ orchestrator:
     - "aave_liquidator_linea"
     - "moonwell_liquidator_base"
     - "compound_liquidator_base"
+    - "compound_liquidator_polygon"
     - "compound_liquidator_arb"
+    - "compound_liquidator_op"
     - "morpho_liquidator_base"
     - "morpho_liquidator_arb"
+    - "morpho_liquidator_polygon"
 
 # ------------------------------------------------------------------------------
 # BOTS — parâmetros por estratégia
@@ -291,7 +294,7 @@ bots:
     chain_id: 59144                   # Linea mainnet
 
   moonwell_liquidator_base:
-    poll_seconds: 30
+    poll_seconds: 1
     health_factor_threshold: 1.05     # shortfall > 0 = liquidável; threshold só para logging
     min_profit_usd: 10.0              # bonus 10% Moonwell — gas Base ~$0.15
     max_positions_per_tick: 100
@@ -300,7 +303,7 @@ bots:
     chain_id: 8453
 
   compound_liquidator_base:
-    poll_seconds: 30                  # intervalo de scan (s)
+    poll_seconds: 1                   # WS-driven: tick fire ~2s/bloco
     health_factor_threshold: 1.2      # vigiar posições com HF < 1.2
     min_profit_usd: 8.0               # só executar absorb() se lucro líquido > $25
     max_positions_per_tick: 50        # máx. posições a verificar por tick
@@ -315,21 +318,45 @@ bots:
     borrower_scan_blocks: 200000      # ~5.5h @ 2s/bloco Base; ~286 borrows/3900 blocos
     chain_id: 8453                    # Base mainnet
 
+  compound_liquidator_polygon:
+    poll_seconds: 1                   # WS-driven: tick fire ~2s/bloco; o intervalo real é por bloco
+    health_factor_threshold: 1.2
+    min_profit_usd: 5.0               # gas Polygon é barato (~$0.01)
+    max_positions_per_tick: 50
+    borrower_scan_blocks: 200000      # ~5.5h @ 2s/bloco Polygon
+    chain_id: 137                     # Polygon mainnet
+
   compound_liquidator_arb:
-    poll_seconds: 30                  # intervalo de scan (s)
+    poll_seconds: 1                   # WS-driven: tick fire ~0.25s/bloco
     health_factor_threshold: 1.2      # vigiar posições com HF < 1.2
     min_profit_usd: 25.0              # gas Arbitrum — absorb() ~$0.30 → breakeven $25
     max_positions_per_tick: 50        # máx. posições a verificar por tick
     borrower_scan_blocks: 400000      # ~5.5h @ 0.25s/bloco Arbitrum (blocos rápidos)
     chain_id: 42161                   # Arbitrum One mainnet
 
+  compound_liquidator_op:
+    poll_seconds: 1                   # WS-driven: tick fire ~2s/bloco
+    health_factor_threshold: 1.2
+    min_profit_usd: 8.0               # gas Optimism ~$0.01–0.05
+    max_positions_per_tick: 50
+    borrower_scan_blocks: 200000      # ~5.5h @ 2s/bloco Optimism
+    chain_id: 10                      # Optimism mainnet
+
   morpho_liquidator_arb:
-    poll_seconds: 30                  # intervalo de scan (s)
+    poll_seconds: 1                   # WS-driven: tick fire ~0.25s/bloco
     health_factor_threshold: 1.2      # vigiar posições com HF < 1.2
     min_profit_usd: 25.0              # liquidação directa sem flash loan — gas ~$0.30
     max_positions_per_tick: 100       # Morpho tem muitos mercados isolados
     borrower_scan_blocks: 400000      # ~5.5h @ 0.25s/bloco Arbitrum
     chain_id: 42161                   # Arbitrum One mainnet
+
+  morpho_liquidator_polygon:
+    poll_seconds: 1                   # WS-driven: tick fire ~2s/bloco
+    health_factor_threshold: 1.2
+    min_profit_usd: 5.0               # gas Polygon é barato
+    max_positions_per_tick: 100
+    borrower_scan_blocks: 200000      # ~5.5h @ 2s/bloco Polygon
+    chain_id: 137                     # Polygon mainnet
 
 # ------------------------------------------------------------------------------
 # NOTIFICAÇÕES

@@ -15,11 +15,17 @@ Diferenças face ao aave_liquidator_bot.py:
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
+import queue
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+
+import websockets
 
 from web3 import Web3
 from web3.exceptions import ContractLogicError
@@ -41,6 +47,11 @@ logger.addHandler(_fh)
 # ── RPC ───────────────────────────────────────────────────────────────────────
 _BASE_RPC_PRIMARY  = "https://base.publicnode.com"
 _BASE_RPC_FALLBACK = "https://mainnet.base.org"
+_BASE_WSS_PRIMARY  = "wss://base.publicnode.com"
+_BASE_WSS_FALLBACK = "wss://base.drpc.org"
+
+# Scan incremental a cada N blocos (~2 min em Base com 2s por bloco)
+_SCAN_INTERVAL_BLOCKS = 60
 
 # ── Moonwell Base addresses ───────────────────────────────────────────────────
 _COMPTROLLER = Web3.to_checksum_address("0xfBb21d0380beE3312B33c4353c8936a0F13EF26C")
@@ -188,6 +199,15 @@ class MoonwellLiquidatorBaseBot:
         self._cooldown:   dict[str, float] = {}
         self._blacklist:  dict[str, float] = {}
         self._fail_counts: dict[str, int]  = {}
+
+        # WebSocket per-block
+        self._block_queue:  queue.Queue = queue.Queue(maxsize=20)
+        self._last_block:   int   = 0
+        self._ws_last_seen: float = time.time()
+        self._ws_stop       = threading.Event()
+        self._ws_thread     = threading.Thread(
+            target=self._ws_runner, daemon=True, name="moonwell-ws-listener")
+        self._ws_thread.start()
 
         self.notifier = TelegramNotifier(settings)
         init_db()
@@ -505,18 +525,97 @@ class MoonwellLiquidatorBaseBot:
             logger.error("MoonwellBase: execução falhou: %s", e)
             return False
 
+    # ── WebSocket listener ────────────────────────────────────────────────────
+    def _ws_runner(self) -> None:
+        """Corre o event-loop asyncio num daemon thread dedicado."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._ws_listen())
+        finally:
+            loop.close()
+
+    async def _ws_listen(self) -> None:
+        """Subscrita a newHeads no Base; reconecta com failover de URL."""
+        wss_urls = [_BASE_WSS_PRIMARY, _BASE_WSS_FALLBACK]
+        idx = 0
+        while not self._ws_stop.is_set():
+            url = wss_urls[idx % len(wss_urls)]
+            try:
+                async with websockets.connect(
+                    url, ping_interval=20, ping_timeout=10, open_timeout=10
+                ) as ws:
+                    await ws.send(json.dumps({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "eth_subscribe", "params": ["newHeads"],
+                    }))
+                    sub = json.loads(await ws.recv())
+                    logger.info(
+                        "MoonwellBase: WS newHeads subscrito @ %s (id=%s)",
+                        url.split("//")[-1].split("/")[0],
+                        sub.get("result", "?")[:12],
+                    )
+                    while not self._ws_stop.is_set():
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                            msg = json.loads(raw)
+                            blk_hex = (msg.get("params") or {}).get("result", {}).get("number")
+                            if blk_hex:
+                                blk = int(blk_hex, 16)
+                                self._ws_last_seen = time.time()
+                                try:
+                                    self._block_queue.put_nowait(blk)
+                                except queue.Full:
+                                    self._block_queue.get_nowait()  # descarta o mais antigo
+                                    self._block_queue.put_nowait(blk)
+                        except asyncio.TimeoutError:
+                            continue   # keepalive — verifica _ws_stop
+                        except Exception:
+                            break      # ligação perdida — reconecta
+            except Exception as exc:
+                logger.warning(
+                    "MoonwellBase: WS erro @ %s — reconecta em 5s: %s",
+                    url.split("//")[-1].split("/")[0], exc,
+                )
+                idx += 1
+            await asyncio.sleep(5)
+
     # ── Main tick ─────────────────────────────────────────────────────────────
     def tick(self) -> None:
-        # Purge expired blacklist/cooldown
+        # ── Drena a fila — fica com o bloco mais recente ──────────────────────
+        block_num = None
+        try:
+            while True:
+                block_num = self._block_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        # Fallback HTTP se WebSocket silencioso há >30s
+        if block_num is None:
+            if time.time() - self._ws_last_seen > 30:
+                try:
+                    block_num = self.w3.eth.block_number
+                except Exception:
+                    return
+            else:
+                return  # aguarda próximo bloco WS
+
+        if block_num <= self._last_block:
+            return
+        self._last_block = block_num
+
+        # ── Housekeeping ──────────────────────────────────────────────────────
         now = time.time()
         self._blacklist = {k: v for k, v in self._blacklist.items() if v > now}
         self._cooldown  = {k: v for k, v in self._cooldown.items()  if v > now}
 
-        # Discover new borrowers
-        self._scan_borrowers()
+        # ── Scan incremental: apenas a cada _SCAN_INTERVAL_BLOCKS (~2 min) ───
+        if block_num % _SCAN_INTERVAL_BLOCKS == 0 or not self._borrowers:
+            self._scan_borrowers()
 
         if not self._borrowers:
-            logger.info("MoonwellBase: 0 mutuários conhecidos — aguardar scan")
+            logger.info("MoonwellBase: bloco %d — scan em progresso (%d mutuários)",
+                        block_num, len(self._borrowers))
             return
 
         # Check subset of borrowers each tick

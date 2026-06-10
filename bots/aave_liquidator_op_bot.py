@@ -281,6 +281,25 @@ class AaveLiquidatorOpBot:
         except Exception:
             return 0.1   # Optimism: ~0.1 Gwei típico
 
+    def _calc_gas_price(self, net_profit_usd: float) -> int:
+        """Priority tip em 3 tiers baseado no lucro estimado. Devolve gasPrice em Wei."""
+        try:
+            base_fee = self.w3.eth.get_block("latest")["baseFeePerGas"]
+        except Exception:
+            base_fee = int(0.1 * 1e9)  # 0.1 gwei fallback (Optimism)
+        if net_profit_usd < 50:
+            tip_gwei = 1.5
+        elif net_profit_usd < 500:
+            tip_gwei = 7.5
+        else:
+            tip_gwei = 25.0
+        gas_price = base_fee + int(tip_gwei * 1e9)
+        logger.info(
+            "AaveOp: gas_price=%.4f gwei (base=%.4f + tip=%.1f) lucro≈$%.2f",
+            gas_price / 1e9, base_fee / 1e9, tip_gwei, net_profit_usd,
+        )
+        return gas_price
+
     def _reserves_list(self) -> list[str]:
         if not self._reserves:
             try:
@@ -430,7 +449,7 @@ class AaveLiquidatorOpBot:
                 "from":     acct.address,
                 "chainId":  OP_CHAIN_ID,
                 "gas":      _GAS_UNITS,
-                "gasPrice": self.w3.eth.gas_price,
+                "gasPrice": self._calc_gas_price(opp.net_profit_usd),
                 "nonce":    self.w3.eth.get_transaction_count(acct.address),
             })
             signed  = acct.sign_transaction(tx)

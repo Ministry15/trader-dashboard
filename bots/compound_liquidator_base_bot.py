@@ -27,6 +27,11 @@ RPC: ALCHEMY_BASE_URL do .env (fallback: https://base-rpc.publicnode.com)
 """
 from __future__ import annotations
 
+import asyncio
+import json
+import queue
+import threading
+import websockets
 import time
 from dataclasses import dataclass, field
 
@@ -55,6 +60,10 @@ _BASE_EXTRA_RPCS    = [
     "https://base.drpc.org",
     "https://1rpc.io/base",
 ]
+_BASE_WSS_PRIMARY  = "wss://base.publicnode.com"
+_BASE_WSS_FALLBACK = "wss://base.drpc.org"
+
+_SCAN_INTERVAL_BLOCKS = 60   # ~2 min em Base (2s/bloco)
 
 _HF_LIQUIDATABLE = 1.0
 _BLACKLIST_FAILS  = 3
@@ -230,6 +239,14 @@ class CompoundLiquidatorBaseBot:
         self._cooldown       : dict[str, float] = {}
         self._fail_counts    : dict[str, int]   = {}
         self._blacklist      : dict[str, float] = {}
+
+        self._block_queue:  queue.Queue = queue.Queue(maxsize=20)
+        self._last_block:   int   = 0
+        self._ws_last_seen: float = time.time()
+        self._ws_stop       = threading.Event()
+        self._ws_thread     = threading.Thread(
+            target=self._ws_runner, daemon=True, name="cmpd-base-ws")
+        self._ws_thread.start()
 
         self.notifier = TelegramNotifier(self.settings)
         init_db()
@@ -559,19 +576,90 @@ class CompoundLiquidatorBaseBot:
 
     # ── tick ─────────────────────────────────────────────────────────────────
 
-    def tick(self) -> list[dict]:
-        if not self._connected():
-            logger.warning("CompoundBase: sem ligação ao RPC Base — tick saltado")
-            return []
+    def _ws_runner(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._ws_listen())
+        finally:
+            loop.close()
 
-        self._scan_borrowers()
-        self._load_assets()
+    async def _ws_listen(self) -> None:
+        wss_urls = [_BASE_WSS_PRIMARY, _BASE_WSS_FALLBACK]
+        idx = 0
+        while not self._ws_stop.is_set():
+            url = wss_urls[idx % len(wss_urls)]
+            try:
+                async with websockets.connect(
+                    url, ping_interval=20, ping_timeout=10, open_timeout=10
+                ) as ws:
+                    await ws.send(json.dumps({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "eth_subscribe", "params": ["newHeads"],
+                    }))
+                    sub = json.loads(await ws.recv())
+                    logger.info("CompoundBase: WS newHeads subscrito @ %s (id=%s)",
+                        url.split("//")[-1].split("/")[0], sub.get("result", "?")[:12])
+                    while not self._ws_stop.is_set():
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                            msg = json.loads(raw)
+                            blk_hex = (msg.get("params") or {}).get("result", {}).get("number")
+                            if blk_hex:
+                                blk = int(blk_hex, 16)
+                                self._ws_last_seen = time.time()
+                                try:
+                                    self._block_queue.put_nowait(blk)
+                                except queue.Full:
+                                    self._block_queue.get_nowait()
+                                    self._block_queue.put_nowait(blk)
+                        except asyncio.TimeoutError:
+                            continue
+                        except Exception:
+                            break
+            except Exception as exc:
+                logger.warning("CompoundBase: WS erro @ %s — reconecta em 5s: %s",
+                    url.split("//")[-1].split("/")[0], exc)
+                idx += 1
+            await asyncio.sleep(5)
+
+    def tick(self) -> list[dict]:
+        block_num = None
+        try:
+            while True:
+                block_num = self._block_queue.get_nowait()
+        except queue.Empty:
+            pass
+        if block_num is None:
+            if time.time() - self._ws_last_seen > 30:
+                try:
+                    block_num = self.w3.eth.block_number
+                except Exception:
+                    return []
+            else:
+                return []
+        if block_num <= self._last_block:
+            return []
+        self._last_block = block_num
+
+        _now_ck = time.time()
+        self._cooldown = {k: v for k, v in self._cooldown.items() if v > _now_ck}
+
+        if block_num % _SCAN_INTERVAL_BLOCKS == 0 or not self._borrowers:
+            self._scan_borrowers()
+            self._load_assets()
+        if not self._borrowers:
+            return []
 
         _pk   = get_env("BSC_PRIVATE_KEY") or ""
         _acct = self.w3.eth.account.from_key(_pk)
         _nonce: int | None = None
         if not self.dry_run:
-            _bal_wei = self.w3.eth.get_balance(_acct.address)
+            try:
+                _bal_wei = self.w3.eth.get_balance(_acct.address)
+            except Exception as exc:
+                logger.warning("CompoundBase: get_balance falhou — tick saltado: %s", exc)
+                return []
             if _bal_wei < Web3.to_wei(0.005, 'ether'):
                 logger.error(
                     "CompoundBase: saldo insuficiente (%.6f ETH < 0.005) — execução suspensa",
@@ -581,8 +669,8 @@ class CompoundLiquidatorBaseBot:
 
         candidates   = list(self._borrowers)[:self.max_per_tick]
         _now_tick    = time.time()
-        logger.info("CompoundBase Tick: %d candidatos | %d blacklist",
-                    len(candidates), len(self._blacklist))
+        logger.info("CompoundBase Tick: bloco=%d %d candidatos | %d blacklist",
+                    block_num, len(candidates), len(self._blacklist))
 
         results: list[dict] = []
         _liq_count = _watch_count = 0

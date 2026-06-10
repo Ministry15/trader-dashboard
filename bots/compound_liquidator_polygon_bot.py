@@ -17,9 +17,14 @@ Logs: /opt/crypto_bsc/logs/compound_polygon.log + journal (get_logger)
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
+import queue
+import threading
 import time
+import websockets
 from dataclasses import dataclass, field
 
 import requests
@@ -49,7 +54,11 @@ POLYGON_CHAIN_ID      = 137
 _PRICE_DECIMALS       = 8         # getPrice retorna USD × 1e8
 _CF_SCALE             = 1e18      # collateralFactor em 1e18
 _GAS_UNITS            = 500_000   # absorb() estimativa conservadora
-_POLYGON_FALLBACK_RPC = "https://polygon.drpc.org"
+_POLYGON_FALLBACK_RPC  = "https://polygon.drpc.org"
+_POLYGON_WSS_PRIMARY   = "wss://polygon-bor.publicnode.com"
+_POLYGON_WSS_FALLBACK  = "wss://polygon.drpc.org"
+
+_SCAN_INTERVAL_BLOCKS  = 60   # ~2 min em Polygon (2s/bloco)
 
 _HF_LIQUIDATABLE = 1.0
 _BLACKLIST_FAILS  = 3
@@ -227,6 +236,14 @@ class CompoundLiquidatorPolygonBot:
         self._cooldown         : dict[str, float] = {}
         self._fail_counts      : dict[str, int]   = {}
         self._blacklist        : dict[str, float] = {}
+
+        self._block_queue:  queue.Queue = queue.Queue(maxsize=20)
+        self._last_block:   int   = 0
+        self._ws_last_seen: float = time.time()
+        self._ws_stop       = threading.Event()
+        self._ws_thread     = threading.Thread(
+            target=self._ws_runner, daemon=True, name="cmpd-polygon-ws")
+        self._ws_thread.start()
 
         self.notifier = TelegramNotifier(self.settings)
         init_db()
@@ -545,16 +562,88 @@ class CompoundLiquidatorPolygonBot:
 
     # ── tick ──────────────────────────────────────────────────────────────────
 
+    def _ws_runner(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._ws_listen())
+        finally:
+            loop.close()
+
+    async def _ws_listen(self) -> None:
+        wss_urls = [_POLYGON_WSS_PRIMARY, _POLYGON_WSS_FALLBACK]
+        idx = 0
+        while not self._ws_stop.is_set():
+            url = wss_urls[idx % len(wss_urls)]
+            try:
+                async with websockets.connect(
+                    url, ping_interval=20, ping_timeout=10, open_timeout=10
+                ) as ws:
+                    await ws.send(json.dumps({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "eth_subscribe", "params": ["newHeads"],
+                    }))
+                    sub = json.loads(await ws.recv())
+                    logger.info("CompoundPolygon: WS newHeads subscrito @ %s (id=%s)",
+                        url.split("//")[-1].split("/")[0], sub.get("result", "?")[:12])
+                    while not self._ws_stop.is_set():
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                            msg = json.loads(raw)
+                            blk_hex = (msg.get("params") or {}).get("result", {}).get("number")
+                            if blk_hex:
+                                blk = int(blk_hex, 16)
+                                self._ws_last_seen = time.time()
+                                try:
+                                    self._block_queue.put_nowait(blk)
+                                except queue.Full:
+                                    self._block_queue.get_nowait()
+                                    self._block_queue.put_nowait(blk)
+                        except asyncio.TimeoutError:
+                            continue
+                        except Exception:
+                            break
+            except Exception as exc:
+                logger.warning("CompoundPolygon: WS erro @ %s — reconecta em 5s: %s",
+                    url.split("//")[-1].split("/")[0], exc)
+                idx += 1
+            await asyncio.sleep(5)
+
     def tick(self) -> list[dict]:
-        if not self._connected():
-            logger.warning("CompoundPolygon: sem ligação ao RPC Polygon — tick saltado")
+        block_num = None
+        try:
+            while True:
+                block_num = self._block_queue.get_nowait()
+        except queue.Empty:
+            pass
+        if block_num is None:
+            if time.time() - self._ws_last_seen > 30:
+                try:
+                    block_num = self.w3.eth.block_number
+                except Exception:
+                    return []
+            else:
+                return []
+        if block_num <= self._last_block:
             return []
+        self._last_block = block_num
+
+        _now_ck = time.time()
+        self._cooldown = {k: v for k, v in self._cooldown.items() if v > _now_ck}
 
         _pk    = get_env("BSC_PRIVATE_KEY") or ""
         _acct  = self.w3.eth.account.from_key(_pk)
-        _nonce = self.w3.eth.get_transaction_count(_acct.address, 'pending')
+        try:
+            _nonce = self.w3.eth.get_transaction_count(_acct.address, 'pending')
+        except Exception as exc:
+            logger.warning("CompoundPolygon: get_nonce falhou — tick saltado: %s", exc)
+            return []
         if not self.dry_run:
-            _bal_wei = self.w3.eth.get_balance(_acct.address)
+            try:
+                _bal_wei = self.w3.eth.get_balance(_acct.address)
+            except Exception as exc:
+                logger.warning("CompoundPolygon: get_balance falhou — tick saltado: %s", exc)
+                return []
             if _bal_wei < Web3.to_wei(1.0, 'ether'):
                 logger.error(
                     "CompoundPolygon: saldo insuficiente (%.4f MATIC < 1.0) — execução suspensa",
@@ -567,8 +656,9 @@ class CompoundLiquidatorPolygonBot:
         for comet_cfg in _COMET_CONFIGS:
             comet_key = comet_cfg["key"]
 
-            self._scan_borrowers(comet_key)
-            self._load_assets(comet_key)
+            if block_num % _SCAN_INTERVAL_BLOCKS == 0 or not self._borrowers.get(comet_key):
+                self._scan_borrowers(comet_key)
+                self._load_assets(comet_key)
 
             _now_tick = time.time()
             logger.info("CompoundPolygon[%s] Tick: %d borrowers | %d blacklist",

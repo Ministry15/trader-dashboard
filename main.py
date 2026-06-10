@@ -28,9 +28,12 @@ from bots.aave_liquidator_linea_bot import AaveLiquidatorLineaBot
 from bots.aave_liquidator_op_bot import AaveLiquidatorOpBot
 from bots.compound_liquidator_arb_bot import CompoundLiquidatorArbBot
 from bots.compound_liquidator_base_bot import CompoundLiquidatorBaseBot
+from bots.compound_liquidator_op_bot import CompoundLiquidatorOpBot
+from bots.compound_liquidator_polygon_bot import CompoundLiquidatorPolygonBot
 from bots.moonwell_liquidator_base_bot import MoonwellLiquidatorBaseBot
 from bots.morpho_liquidator_arb_bot import MorphoLiquidatorArbBot
 from bots.morpho_liquidator_base_bot import MorphoLiquidatorBaseBot
+from bots.morpho_liquidator_polygon_bot import MorphoLiquidatorPolygonBot
 from bots.aave_liquidator_scroll_bot import AaveLiquidatorScrollBot
 from bots.aave_liquidator_bot import AaveLiquidatorBot
 from bots.aave_liquidator_polygon_bot import AaveLiquidatorPolygonBot
@@ -86,10 +89,16 @@ BOT_REGISTRY = {
                                  lambda s: int(s.get("bots", {}).get("compound_liquidator_base", {}).get("poll_seconds", 30))),
     "compound_liquidator_arb": (CompoundLiquidatorArbBot, "tick",
                                 lambda s: int(s.get("bots", {}).get("compound_liquidator_arb", {}).get("poll_seconds", 30))),
+    "compound_liquidator_polygon": (CompoundLiquidatorPolygonBot, "tick",
+                                    lambda s: int(s.get("bots", {}).get("compound_liquidator_polygon", {}).get("poll_seconds", 1))),
+    "compound_liquidator_op": (CompoundLiquidatorOpBot, "tick",
+                               lambda s: int(s.get("bots", {}).get("compound_liquidator_op", {}).get("poll_seconds", 1))),
     "morpho_liquidator_base": (MorphoLiquidatorBaseBot, "tick",
                                lambda s: int(s.get("bots", {}).get("morpho_liquidator_base", {}).get("poll_seconds", 30))),
     "morpho_liquidator_arb": (MorphoLiquidatorArbBot, "tick",
                               lambda s: int(s.get("bots", {}).get("morpho_liquidator_arb", {}).get("poll_seconds", 30))),
+    "morpho_liquidator_polygon": (MorphoLiquidatorPolygonBot, "tick",
+                                  lambda s: int(s.get("bots", {}).get("morpho_liquidator_polygon", {}).get("poll_seconds", 1))),
 }
 
 

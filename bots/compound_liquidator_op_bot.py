@@ -17,9 +17,14 @@ Logs: /opt/crypto_bsc/logs/compound_op.log + journal (get_logger)
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
+import queue
+import threading
 import time
+import websockets
 from dataclasses import dataclass, field
 
 import requests
@@ -49,7 +54,11 @@ OP_CHAIN_ID         = 10
 _PRICE_DECIMALS     = 8         # getPrice retorna USD × 1e8
 _CF_SCALE           = 1e18      # collateralFactor em 1e18
 _GAS_UNITS          = 500_000   # absorb() estimativa conservadora
-_OP_FALLBACK_RPC    = "https://optimism.drpc.org"
+_OP_FALLBACK_RPC      = "https://optimism.drpc.org"
+_OP_WSS_PRIMARY       = "wss://optimism.publicnode.com"
+_OP_WSS_FALLBACK      = "wss://optimism.drpc.org"
+
+_SCAN_INTERVAL_BLOCKS = 60   # ~2 min em Optimism (2s/bloco)
 
 # WETH Optimism — usado para estimar preço do gas em USD
 _WETH_ADDRESS       = "0x4200000000000000000000000000000000000006"
@@ -230,6 +239,14 @@ class CompoundLiquidatorOpBot:
         self._cooldown   : dict[str, float] = {}
         self._fail_counts: dict[str, int]   = {}
         self._blacklist  : dict[str, float] = {}
+
+        self._block_queue:  queue.Queue = queue.Queue(maxsize=20)
+        self._last_block:   int   = 0
+        self._ws_last_seen: float = time.time()
+        self._ws_stop       = threading.Event()
+        self._ws_thread     = threading.Thread(
+            target=self._ws_runner, daemon=True, name="cmpd-op-ws")
+        self._ws_thread.start()
 
         self.notifier = TelegramNotifier(self.settings)
         init_db()
@@ -550,30 +567,103 @@ class CompoundLiquidatorOpBot:
 
     # ── tick ──────────────────────────────────────────────────────────────────
 
+    def _ws_runner(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._ws_listen())
+        finally:
+            loop.close()
+
+    async def _ws_listen(self) -> None:
+        wss_urls = [_OP_WSS_PRIMARY, _OP_WSS_FALLBACK]
+        idx = 0
+        while not self._ws_stop.is_set():
+            url = wss_urls[idx % len(wss_urls)]
+            try:
+                async with websockets.connect(
+                    url, ping_interval=20, ping_timeout=10, open_timeout=10
+                ) as ws:
+                    await ws.send(json.dumps({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "eth_subscribe", "params": ["newHeads"],
+                    }))
+                    sub = json.loads(await ws.recv())
+                    logger.info("CompoundOp: WS newHeads subscrito @ %s (id=%s)",
+                        url.split("//")[-1].split("/")[0], sub.get("result", "?")[:12])
+                    while not self._ws_stop.is_set():
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                            msg = json.loads(raw)
+                            blk_hex = (msg.get("params") or {}).get("result", {}).get("number")
+                            if blk_hex:
+                                blk = int(blk_hex, 16)
+                                self._ws_last_seen = time.time()
+                                try:
+                                    self._block_queue.put_nowait(blk)
+                                except queue.Full:
+                                    self._block_queue.get_nowait()
+                                    self._block_queue.put_nowait(blk)
+                        except asyncio.TimeoutError:
+                            continue
+                        except Exception:
+                            break
+            except Exception as exc:
+                logger.warning("CompoundOp: WS erro @ %s — reconecta em 5s: %s",
+                    url.split("//")[-1].split("/")[0], exc)
+                idx += 1
+            await asyncio.sleep(5)
+
     def tick(self) -> list[dict]:
-        if not self._connected():
-            logger.warning("CompoundOp: sem ligação ao RPC Optimism — tick saltado")
+        block_num = None
+        try:
+            while True:
+                block_num = self._block_queue.get_nowait()
+        except queue.Empty:
+            pass
+        if block_num is None:
+            if time.time() - self._ws_last_seen > 30:
+                try:
+                    block_num = self.w3.eth.block_number
+                except Exception:
+                    return []
+            else:
+                return []
+        if block_num <= self._last_block:
             return []
+        self._last_block = block_num
+
+        _now_ck = time.time()
+        self._cooldown = {k: v for k, v in self._cooldown.items() if v > _now_ck}
 
         _nonce = 0
         if not self.dry_run:
             _acct = self.w3.eth.account.from_key(get_env("BSC_PRIVATE_KEY") or "")
-            _bal_wei = self.w3.eth.get_balance(_acct.address)
+            try:
+                _bal_wei = self.w3.eth.get_balance(_acct.address)
+            except Exception as exc:
+                logger.warning("CompoundOp: get_balance falhou — tick saltado: %s", exc)
+                return []
             if _bal_wei < Web3.to_wei(0.005, 'ether'):
                 logger.error(
                     "CompoundOp: saldo insuficiente (%.6f ETH < 0.005) — tick saltado",
                     _bal_wei / 1e18,
                 )
                 return []
-            _nonce = self.w3.eth.get_transaction_count(_acct.address, "pending")
+            try:
+                _nonce = self.w3.eth.get_transaction_count(_acct.address, "pending")
+            except Exception as exc:
+                logger.warning("CompoundOp: get_nonce falhou — tick saltado: %s", exc)
+                return []
 
         results: list[dict] = []
 
         for comet_cfg in _COMET_CONFIGS:
             comet_key = comet_cfg["key"]
 
-            self._scan_borrowers(comet_key)
-            self._load_assets(comet_key)
+            if block_num % _SCAN_INTERVAL_BLOCKS == 0 or not self._borrowers.get(comet_key):
+                self._scan_borrowers(comet_key)
+                self._load_assets(comet_key)
 
             # Phase 1: construir lista elegível para este Comet
             eligible_opps: list[LiqOpportunityCompoundOp] = []
