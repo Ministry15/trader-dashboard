@@ -2,10 +2,11 @@
 #  trader_api.py — Trader Dashboard API  v2
 # ============================================================
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import subprocess, re, time, os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 try:
@@ -124,6 +125,72 @@ def get_service_status(service: str) -> dict:
         return {"service": service, "status": status, "active": status == "active", "uptime_since": since}
     except Exception:
         return {"service": service, "status": "unknown", "active": False}
+
+# ─── AUDIT HELPERS ────────────────────────────────────────────────────────────
+
+_BOT_SERVICE: dict[str, str] = {
+    "aave_base":        "liquidator-aave-base",
+    "aave_polygon":     "liquidator-aave-polygon",
+    "aave_arb":         "liquidator-aave-arb",
+    "aave_op":          "liquidator-aave-op",
+    "aave_avax":        "liquidator-aave-avax",
+    "aave_scroll":      "liquidator-aave-scroll",
+    "aave_linea":       "liquidator-aave-linea",
+    "compound_base":    "liquidator-compound-base",
+    "compound_polygon": "liquidator-compound-polygon",
+    "compound_arb":     "liquidator-compound-arb",
+    "compound_op":      "liquidator-compound-op",
+    "morpho_base":      "liquidator-morpho-base",
+    "morpho_polygon":   "liquidator-morpho-polygon",
+    "morpho_arb":       "liquidator-morpho-arb",
+    "moonwell_base":    "crypto_bsc",
+    "ionic_base":       "crypto_bsc",
+    "venus_bsc":        "crypto_bsc",
+}
+
+_BOT_WS: set[str] = {"aave_base", "aave_polygon"}
+
+_BOT_LOG_FILTER: dict[str, str] = {
+    "moonwell_base": "moonwell_liquidator_base_bot",
+    "ionic_base":    "ionic_liquidator_base_bot",
+    "venus_bsc":     "venus_liquidator_bsc_bot",
+}
+
+
+def _fetch_gas_for_chains(wallet: str) -> dict:
+    """Returns {chain_id: {balance, symbol}} for all liquidation chains."""
+    import urllib.request as _req, json as _j
+    CHAINS_AUDIT = [
+        (8453,   ["https://base-rpc.publicnode.com",        "https://mainnet.base.org"],             "ETH"),
+        (42161,  ["https://arb1.arbitrum.io/rpc",           "https://arbitrum-one-rpc.publicnode.com"], "ETH"),
+        (10,     ["https://op-pokt-nm.nodies.app",          "https://optimism.publicnode.com"],       "ETH"),
+        (534352, ["https://rpc.scroll.io"],                                                            "ETH"),
+        (59144,  ["https://rpc.linea.build"],                                                          "ETH"),
+        (137,    ["https://rpc.ankr.com/polygon",           "https://1rpc.io/matic"],                 "POL"),
+        (43114,  ["https://api.avax.network/ext/bc/C/rpc"],                                           "AVAX"),
+        (56,     ["https://bsc-dataseed.binance.org/",      "https://bsc-dataseed1.defibit.io/"],     "BNB"),
+    ]
+    _H = {"Content-Type": "application/json", "Accept": "application/json"}
+
+    def _fetch_one(chain_id, rpcs, symbol):
+        payload = _j.dumps({"jsonrpc": "2.0", "method": "eth_getBalance",
+                             "params": [wallet, "latest"], "id": 1}).encode()
+        for rpc in rpcs:
+            try:
+                r = _req.Request(rpc, data=payload, headers=_H, method="POST")
+                with _req.urlopen(r, timeout=5) as resp:
+                    result = _j.loads(resp.read()).get("result", "0x0")
+                return chain_id, {"balance": round(int(result, 16) / 1e18, 6), "symbol": symbol}
+            except Exception:
+                pass
+        return chain_id, {"balance": None, "symbol": symbol}
+
+    out: dict = {}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for cid, data in ex.map(lambda c: _fetch_one(*c), CHAINS_AUDIT):
+            out[cid] = data
+    return out
+
 
 def parse_sniper_pnl(logs: list[str]) -> dict:
     """Parseia TAKE_PROFIT e STOP_LOSS em WBNB e USDT."""
@@ -725,7 +792,6 @@ def get_liquidations_morpho_arb(limit: int = 50):
 @app.get("/api/gas")
 def get_gas():
     import urllib.request, json as _json
-    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     WALLET = "0xb6E646Fa7a4e1CE48510BD3bcD756c00CbDFD434"
     CHAINS = [
@@ -769,8 +835,8 @@ def get_gas():
 
 
 @app.get("/api/health")
-def get_health():
-    """Comprehensive health of all 17 liquidation bots + system snapshot."""
+def get_health(full: bool = Query(False)):
+    """Comprehensive health of all 17 liquidation bots. ?full=true adds per-bot audit data."""
     cfg      = _load_yaml(_SETTINGS_PATH)
     bots_cfg = cfg.get("bots", {})
 
@@ -820,6 +886,71 @@ def get_health():
 
     live_count = sum(1 for b in bots if not b["dry_run"])
     svc        = get_service_status("crypto_bsc")
+
+    # ── full audit (only when ?full=true) ─────────────────────────────────────
+    if full:
+        _WALLET  = "0xb6E646Fa7a4e1CE48510BD3bcD756c00CbDFD434"
+        TICK_RE  = re.compile(r"→ tick|tick —|Tick:|tick bloco=", re.IGNORECASE)
+        unique_svcs = list(set(_BOT_SERVICE.values()))
+
+        def _fetch_svc(s: str):
+            status = subprocess.run(
+                ["systemctl", "is-active", s],
+                capture_output=True, text=True, timeout=5
+            ).stdout.strip()
+            return s, {
+                "status":     status,
+                "tick_lines": run_journalctl(s, since="1h",  lines=400),
+                "err_lines":  run_journalctl(s, since="2h",  lines=3000),
+            }
+
+        svc_cache:    dict = {}
+        gas_by_chain: dict = {}
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            gas_fut  = ex.submit(_fetch_gas_for_chains, _WALLET)
+            svc_futs = {ex.submit(_fetch_svc, s): s for s in unique_svcs}
+            gas_by_chain = gas_fut.result(timeout=20)
+            for fut in svc_futs:
+                try:
+                    k, v = fut.result(timeout=35)
+                    svc_cache[k] = v
+                except Exception:
+                    pass
+
+        for b in bots:
+            bid = b["id"]
+            sd  = svc_cache.get(_BOT_SERVICE.get(bid, ""), {})
+            lf  = _BOT_LOG_FILTER.get(bid)
+
+            last_tick = None
+            for line in reversed(sd.get("tick_lines", [])):
+                if lf and lf not in line:
+                    continue
+                if TICK_RE.search(line):
+                    m = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                    if m:
+                        last_tick = m.group(1)
+                    break
+
+            e429 = econn = 0
+            for line in sd.get("err_lines", []):
+                if not line:
+                    continue
+                if lf and lf not in line:
+                    continue
+                if "429" in line:
+                    e429 += 1
+                elif "sem ligação" in line:
+                    econn += 1
+
+            b["audit"] = {
+                "systemd_status":  sd.get("status", "unknown"),
+                "connection_type": "websocket" if bid in _BOT_WS else "http_polling",
+                "last_tick":       last_tick,
+                "errors_2h":       {"http_429": e429, "no_connection": econn},
+                "gas":             gas_by_chain.get(b["chain_id"], {}),
+            }
+    # ──────────────────────────────────────────────────────────────────────────
 
     return {
         "status":  "ok" if svc["active"] else "degraded",
