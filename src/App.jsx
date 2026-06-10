@@ -1362,7 +1362,7 @@ function LogsTab() {
 }
 
 // ─── SYSTEM ───────────────────────────────────────────────────────────────────
-function SystemTab({ data }) {
+function SystemTab({ data, botHealth }) {
   if (!data) return <Loader />;
 
   const cpu  = data.cpu_percent     ?? null;
@@ -1392,6 +1392,19 @@ function SystemTab({ data }) {
     ? data.services
     : Object.entries(data.services ?? {}).map(([k, v]) => ({ service: k, status: v, active: v === 'active' || v === true }));
 
+  const PROTOCOL_COLORS = {
+    'Aave V3':     '#B6509E',
+    'Compound V3': '#00D395',
+    'Morpho Blue': '#2470FF',
+    'Moonwell':    '#FF8C00',
+    'Ionic':       '#00BCD4',
+    'Venus':       '#F0B90B',
+  };
+
+  const bots = botHealth?.bots ?? [];
+  const liveCount = bots.filter(b => !b.dry_run).length;
+  const dryCount  = bots.filter(b => b.dry_run).length;
+
   return (
     <div>
       <div className="row3 mb">
@@ -1419,6 +1432,48 @@ function SystemTab({ data }) {
                 <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--green)' }}>{fmt(Number(v), 2)}</div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {bots.length > 0 && (
+        <div className="panel mb">
+          <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>LIQUIDATION BOTS ({bots.length})</span>
+            <span style={{ fontSize: 10, fontWeight: 400 }}>
+              <span style={{ color: 'var(--green)' }}>{liveCount} LIVE</span>
+              {' · '}
+              <span style={{ color: 'var(--yellow)' }}>{dryCount} DRY-RUN</span>
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, marginTop: 10 }}>
+            {bots.map(b => {
+              const isLive = !b.dry_run;
+              const color  = PROTOCOL_COLORS[b.protocol] ?? '#888';
+              return (
+                <div key={b.id} style={{
+                  background: '#1a1a1a',
+                  borderRadius: 4,
+                  padding: '8px 10px',
+                  borderLeft: `3px solid ${isLive ? color : '#555'}`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 3,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#ddd' }}>{b.name}</span>
+                    <span className={`badge ${isLive ? 'bg' : 'by'}`} style={{ fontSize: 9 }}>
+                      {isLive ? 'LIVE' : 'DRY'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 9, color: '#666' }}>
+                    {b.contract
+                      ? `${b.contract.slice(0, 6)}…${b.contract.slice(-4)}`
+                      : 'no contract'}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1553,11 +1608,12 @@ export default function App() {
   const [liquidationsMorphoPolygon,   setLiquidationsMorphoPolygon]   = useState(null);
   const [liquidationsMorphoArb,       setLiquidationsMorphoArb]       = useState(null);
   const [gas,                         setGas]                         = useState(null);
+  const [botHealth,                   setBotHealth]                   = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const errs = {};
-    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR, liquidationsMorphoBaseR, liquidationsCompoundPolygonR, liquidationsCompoundArbR, liquidationsCompoundOpR, liquidationsMorphoPolygonR, liquidationsMorphoArbR, gasR] = await Promise.allSettled([
+    const [pnlR, ibkrR, sniperR, gridR, fundingR, systemR, flashArbR, liquidationsR, liquidationsPolygonR, liquidationsAvaxR, liquidationsArbR, liquidationsOpR, liquidationsScrollR, liquidationsLineaR, liquidationsCompoundBaseR, liquidationsMorphoBaseR, liquidationsCompoundPolygonR, liquidationsCompoundArbR, liquidationsCompoundOpR, liquidationsMorphoPolygonR, liquidationsMorphoArbR, gasR, botHealthR] = await Promise.allSettled([
       apiFetch('/api/pnl'),
       apiFetch('/api/ibkr'),
       apiFetch('/api/sniper'),
@@ -1580,6 +1636,7 @@ export default function App() {
       apiFetch('/api/liquidations/morpho_polygon'),
       apiFetch('/api/liquidations/morpho_arb'),
       apiFetch('/api/gas'),
+      apiFetch('/api/health'),
     ]);
     if (pnlR.status                === 'fulfilled') setPnl(pnlR.value);                           else errs.pnl          = pnlR.reason?.message;
     if (ibkrR.status               === 'fulfilled') setIbkr(ibkrR.value);                         else errs.ibkr         = ibkrR.reason?.message;
@@ -1603,6 +1660,7 @@ export default function App() {
     if (liquidationsMorphoPolygonR.status   === 'fulfilled') setLiquidationsMorphoPolygon(liquidationsMorphoPolygonR.value);
     if (liquidationsMorphoArbR.status       === 'fulfilled') setLiquidationsMorphoArb(liquidationsMorphoArbR.value);
     if (gasR.status                         === 'fulfilled') setGas(gasR.value);
+    if (botHealthR.status                   === 'fulfilled') setBotHealth(botHealthR.value);
     setErrors(errs);
     setOnline(Object.keys(errs).length < 7);
     setLoading(false);
@@ -1691,7 +1749,7 @@ export default function App() {
         {activeTab === 'flash-arb' && (errors.flashArb ? <Err msg={errors.flashArb} /> : <FlashArbTab data={flashArb} />)}
         {activeTab === 'liquidations' && (errors.liquidations ? <Err msg={errors.liquidations} /> : <LiquidationsTab dataBase={liquidations} dataPolygon={liquidationsPolygon} dataAvax={liquidationsAvax} dataArb={liquidationsArb} dataOp={liquidationsOp} dataScroll={liquidationsScroll} dataLinea={liquidationsLinea} dataCompoundBase={liquidationsCompoundBase} dataMorphoBase={liquidationsMorphoBase} dataCompoundPolygon={liquidationsCompoundPolygon} dataCompoundArb={liquidationsCompoundArb} dataCompoundOp={liquidationsCompoundOp} dataMorphoPolygon={liquidationsMorphoPolygon} dataMorphoArb={liquidationsMorphoArb} />)}
         {activeTab === 'logs'      && <LogsTab />}
-        {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system}  />)}
+        {activeTab === 'system'   && (errors.system  ? <Err msg={errors.system}  /> : <SystemTab  data={system} botHealth={botHealth} />)}
       </main>
     </div>
   );

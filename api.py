@@ -34,8 +34,9 @@ CORS(app, resources={"/*": {"origins": "*"}})
 def _check_auth():
     if request.path in ("/health", "/"):
         return
-    auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {API_TOKEN}":
+    bearer  = request.headers.get("Authorization", "")
+    api_key = request.headers.get("x-api-key", "")
+    if bearer != f"Bearer {API_TOKEN}" and api_key != API_TOKEN:
         return jsonify({"error": "Forbidden"}), 403
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -614,6 +615,106 @@ def api_logs(service):
     return jsonify({"logs": logs, "service": service, "ts": _utc()})
 
 
+@app.get("/api/health")
+def api_health():
+    """Comprehensive health of all 17 liquidation bots + system snapshot."""
+    settings = get_settings()
+
+    def _cfg(key: str) -> dict:
+        return settings.get("bots", {}).get(key, {})
+
+    def _contract(cfg_key: str, env_key: str = "") -> str:
+        if env_key:
+            v = get_env(env_key, "")
+            if v:
+                return v
+        return _cfg(cfg_key).get("flash_loan_contract", "")
+
+    # per-chain deployed contracts
+    base_contract    = get_env("FLASH_LOAN_CONTRACT_BASE",    "0x843730A2114b8624a36B4D4956aDdc6005bc5c30")
+    polygon_contract = _contract("aave_liquidator_polygon",   "FLASH_LOAN_CONTRACT_POLYGON")
+    arb_contract     = _contract("aave_liquidator_arb",       "FLASH_LOAN_CONTRACT_ARB")
+    op_contract      = _contract("aave_liquidator_op",        "FLASH_LOAN_CONTRACT_OP")
+    avax_contract    = _contract("aave_liquidator_avax",      "FLASH_LOAN_CONTRACT_AVAX")
+    moonwell_contract= _cfg("moonwell_liquidator_base").get("flash_loan_contract", "")
+
+    def _bot(id, name, protocol, chain, chain_id, contract):
+        live = bool(contract)
+        return {
+            "id":       id,
+            "name":     name,
+            "protocol": protocol,
+            "chain":    chain,
+            "chain_id": chain_id,
+            "dry_run":  not live,
+            "contract": contract or None,
+            "status":   "live" if live else "dry_run",
+        }
+
+    bots = [
+        _bot("aave_base",        "Aave V3 Base",          "Aave V3",     "Base",      8453,  base_contract),
+        _bot("aave_polygon",     "Aave V3 Polygon",       "Aave V3",     "Polygon",   137,   polygon_contract),
+        _bot("aave_arb",         "Aave V3 Arbitrum",      "Aave V3",     "Arbitrum",  42161, arb_contract),
+        _bot("aave_op",          "Aave V3 Optimism",      "Aave V3",     "Optimism",  10,    op_contract),
+        _bot("aave_avax",        "Aave V3 Avalanche",     "Aave V3",     "Avalanche", 43114, avax_contract),
+        _bot("aave_scroll",      "Aave V3 Scroll",        "Aave V3",     "Scroll",    534352,""),
+        _bot("aave_linea",       "Aave V3 Linea",         "Aave V3",     "Linea",     59144, ""),
+        _bot("compound_base",    "Compound V3 Base",      "Compound V3", "Base",      8453,  base_contract),
+        _bot("compound_polygon", "Compound V3 Polygon",   "Compound V3", "Polygon",   137,   polygon_contract),
+        _bot("compound_arb",     "Compound V3 Arbitrum",  "Compound V3", "Arbitrum",  42161, arb_contract),
+        _bot("compound_op",      "Compound V3 Optimism",  "Compound V3", "Optimism",  10,    op_contract),
+        _bot("morpho_base",      "Morpho Blue Base",      "Morpho Blue", "Base",      8453,  base_contract),
+        _bot("morpho_polygon",   "Morpho Blue Polygon",   "Morpho Blue", "Polygon",   137,   polygon_contract),
+        _bot("morpho_arb",       "Morpho Blue Arbitrum",  "Morpho Blue", "Arbitrum",  42161, arb_contract),
+        _bot("moonwell_base",    "Moonwell Base",         "Moonwell",    "Base",      8453,  moonwell_contract),
+        _bot("ionic_base",       "Ionic Base",            "Ionic",       "Base",      8453,  base_contract),
+        _bot("venus_bsc",        "Venus BSC",             "Venus",       "BSC",       56,    ""),
+    ]
+
+    live_count = sum(1 for b in bots if not b["dry_run"])
+    dry_count  = len(bots) - live_count
+
+    # lightweight system snapshot
+    try:
+        with open("/proc/uptime") as f:
+            uptime_secs = float(f.read().split()[0])
+    except Exception:
+        uptime_secs = 0.0
+    mem: dict = {}
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2:
+                    mem[parts[0].rstrip(":")] = int(parts[1])
+    except Exception:
+        pass
+    mem_total = mem.get("MemTotal", 1) // 1024
+    mem_avail = mem.get("MemAvailable", 0) // 1024
+    mem_used  = mem_total - mem_avail
+
+    svc_status = _svc_status("crypto_bsc")
+
+    return jsonify({
+        "status":  "ok" if svc_status == "active" else "degraded",
+        "service": svc_status,
+        "bots":    bots,
+        "summary": {
+            "total":   len(bots),
+            "live":    live_count,
+            "dry_run": dry_count,
+        },
+        "system": {
+            "uptime_secs":  uptime_secs,
+            "uptime_human": _fmt_uptime(uptime_secs),
+            "mem_total_mb": mem_total,
+            "mem_used_mb":  mem_used,
+            "mem_pct":      round(mem_used / mem_total * 100, 1) if mem_total else 0,
+        },
+        "ts": _utc(),
+    })
+
+
 if __name__ == "__main__":
     init_db()
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=8000, debug=False)
