@@ -200,6 +200,7 @@ class AaveLiquidatorLineaBot:
         init_db()
 
         if not flash_addr:
+            self.dry_run = True
             logger.warning(
                 "AaveLinea: flash_loan_contract não configurado — modo DRY_RUN forçado para live"
             )

@@ -38,7 +38,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Constantes
 # ---------------------------------------------------------------------------
-FUNDING_THRESHOLD = 0.0005      # 0.05% por período de 8h
+FUNDING_THRESHOLD = 0.0015      # 0.15% por período de 8h — cobre fees Binance (0.04%+0.10%)×2 + margem
 FUNDING_SCAN_SYMBOLS = 50       # top-N pares a monitorizar (por |funding rate|)
 TOP_N_REPORT = 5                # pares no relatório Telegram
 
