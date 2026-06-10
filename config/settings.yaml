@@ -266,7 +266,7 @@ bots:
     min_profit_usd: 8.0               # só executar se lucro líquido > $25 (DRY_RUN ignora)
     max_positions_per_tick: 50        # máx. posições a verificar por tick
     borrower_scan_blocks: 5000        # janela de blocos para descobrir mutuários (~2h em Optimism)
-    flash_loan_contract: ""           # preencher quando contrato for deployado na Optimism
+    flash_loan_contract: "0x9531F6F28202B7E83717b31992035F769046135B"
     chain_id: 10                      # Optimism mainnet
 
   aave_liquidator_scroll:
