@@ -261,9 +261,16 @@ class AaveLiquidatorBot:
         self.settings = settings or get_settings()
         self.cfg = self.settings.get("bots", {}).get("aave_liquidator", {})
 
-        primary_rpc = get_env("ALCHEMY_BASE_URL") or "https://mainnet.base.org"
-        # Fallback público para quando o Alchemy faz rate-limit (429)
-        self._rpc_urls: list[str] = [primary_rpc, "https://base.drpc.org"]
+        primary_rpc = get_env("ALCHEMY_BASE_URL") or "https://base-rpc.publicnode.com"
+        self._rpc_urls: list[str] = [
+            primary_rpc,
+            "https://mainnet.base.org",
+            "https://base.drpc.org",
+            "https://base-rpc.publicnode.com",
+        ]
+        # Deduplica mantendo a ordem
+        seen: set[str] = set()
+        self._rpc_urls = [u for u in self._rpc_urls if not (u in seen or seen.add(u))]
         self._active_rpc: str = primary_rpc
 
         self.dry_run     : bool  = False
@@ -333,7 +340,7 @@ class AaveLiquidatorBot:
                 if status == 429:
                     if attempt == 0:
                         logger.warning(
-                            "Alchemy rate-limit (429) — a tentar fallback RPC (tentativa %d/3)",
+                            "RPC rate-limit (429) — a tentar fallback (tentativa %d/3)",
                             attempt + 1,
                         )
                         if self._switch_rpc(self._active_rpc):
@@ -342,13 +349,15 @@ class AaveLiquidatorBot:
                     logger.debug("429 rate-limit, aguardar %ds…", wait)
                     time.sleep(wait)
                 else:
-                    logger.debug("HTTP %s ao verificar ligação: %s", status, exc)
+                    # 403 Forbidden, 5xx, etc. — trocar RPC imediatamente
+                    logger.warning("HTTP %s no RPC Base — a tentar fallback", status)
+                    if attempt == 0 and self._switch_rpc(self._active_rpc):
+                        continue
                     return False
             except Exception as exc:
                 logger.debug("Erro ao verificar ligação RPC: %s", exc)
-                if attempt == 0 and self._active_rpc != "https://base.drpc.org":
-                    if self._switch_rpc(self._active_rpc):
-                        continue
+                if attempt == 0 and self._switch_rpc(self._active_rpc):
+                    continue
                 return False
         return False
 
