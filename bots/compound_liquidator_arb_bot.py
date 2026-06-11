@@ -55,7 +55,7 @@ _PRICE_DECIMALS     = 8         # getPrice retorna USD × 1e8
 _CF_SCALE           = 1e18      # collateralFactor em 1e18
 _GAS_UNITS          = 500_000   # absorb() estimativa conservadora
 _ARB_FALLBACK_RPC      = "https://arb.drpc.org"
-_ARB_WSS_PRIMARY       = "wss://arbitrum-one.publicnode.com"
+_ARB_WSS_PRIMARY       = "wss://ws-nd-046-651-130.p2pify.com/e65bf8b852275ebf779b22d71f90745a"
 _ARB_WSS_FALLBACK      = "wss://arb.drpc.org"
 
 _SCAN_INTERVAL_BLOCKS  = 1200  # ~5 min em Arbitrum (0.25s/bloco)

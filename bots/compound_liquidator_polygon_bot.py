@@ -59,7 +59,7 @@ _PRICE_DECIMALS       = 8         # getPrice retorna USD × 1e8
 _CF_SCALE             = 1e18      # collateralFactor em 1e18
 _GAS_UNITS            = 500_000   # absorb() estimativa conservadora
 _POLYGON_FALLBACK_RPC  = "https://polygon.drpc.org"
-_POLYGON_WSS_PRIMARY   = "wss://polygon-bor.publicnode.com"
+_POLYGON_WSS_PRIMARY   = "wss://ws-nd-885-494-770.p2pify.com/c3d7b889db6c1eb7cfc287501eea2d19"
 _POLYGON_WSS_FALLBACK  = "wss://polygon.drpc.org"
 
 _SCAN_INTERVAL_BLOCKS  = 60   # ~2 min em Polygon (2s/bloco)

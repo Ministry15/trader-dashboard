@@ -61,7 +61,7 @@ _LLTV_SCALE      = 10 ** 18   # LLTV em WAD
 _GAS_UNITS       = 350_000    # liquidate() no Arbitrum
 _FALLBACK_RPC_1  = "https://arb.drpc.org"
 _FALLBACK_RPC_2        = "https://rpc.ankr.com/arbitrum"
-_ARB_WSS_PRIMARY       = "wss://arbitrum-one.publicnode.com"
+_ARB_WSS_PRIMARY       = "wss://ws-nd-046-651-130.p2pify.com/e65bf8b852275ebf779b22d71f90745a"
 _ARB_WSS_FALLBACK      = "wss://arb.drpc.org"
 
 _SCAN_INTERVAL_BLOCKS  = 1200  # ~5 min em Arbitrum (0.25s/bloco)

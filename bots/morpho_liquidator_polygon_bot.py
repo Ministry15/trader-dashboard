@@ -65,7 +65,7 @@ _LLTV_SCALE       = 10 ** 18   # LLTV em WAD
 _GAS_UNITS        = 350_000    # liquidate() na Polygon
 _FALLBACK_RPC_1   = "https://polygon.drpc.org"
 _FALLBACK_RPC_2       = "https://rpc.ankr.com/polygon"
-_POLYGON_WSS_PRIMARY  = "wss://polygon-bor.publicnode.com"
+_POLYGON_WSS_PRIMARY  = "wss://ws-nd-885-494-770.p2pify.com/c3d7b889db6c1eb7cfc287501eea2d19"
 _POLYGON_WSS_FALLBACK = "wss://polygon.drpc.org"
 
 _SCAN_INTERVAL_BLOCKS = 60   # ~2 min em Polygon (2s/bloco)
