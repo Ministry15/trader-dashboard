@@ -50,11 +50,9 @@ logger.addHandler(_fh)
 
 # ── RPC ───────────────────────────────────────────────────────────────────────
 _BASE_RPC_POOL = [
-    "https://base.gateway.tenderly.co",
-    "https://base.meowrpc.com",
-    "https://mainnet.base.org",
-    "https://base-pokt.nodies.app",
     "https://base-rpc.publicnode.com",
+    "https://1rpc.io/base",
+    "https://mainnet.base.org",
 ]
 _BASE_WSS_PRIMARY  = "wss://base.publicnode.com"
 _BASE_WSS_FALLBACK = "wss://base.drpc.org"

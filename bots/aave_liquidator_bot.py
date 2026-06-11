@@ -58,7 +58,8 @@ _BONUS: dict[str, float] = {
 }
 _DEFAULT_BONUS     = 0.050  # 5% conservador
 
-_HF_LIQUIDATABLE = 1.0      # Aave V3: só liquidável quando HF < 1.0 (monitorização em 1.2)
+_HF_LIQUIDATABLE      = 1.0   # Aave V3: só liquidável quando HF < 1.0 (monitorização em 1.2)
+_HF_RESERVE_THRESHOLD = 1.05  # reserve_data + _estimate só para HF abaixo disto; acima: só monitorizar
 
 _FLASHBOTS_ENDPOINT      = "https://relay.flashbots.net"
 _FLASHBOTS_MIN_PROFIT_USD = 500.0
@@ -262,13 +263,11 @@ class AaveLiquidatorBot:
         self.cfg = self.settings.get("bots", {}).get("aave_liquidator", {})
 
         _base_rpc_pool = [
-            "https://base.gateway.tenderly.co",
-            "https://base.meowrpc.com",
-            "https://mainnet.base.org",
-            "https://base-pokt.nodies.app",
             "https://base-rpc.publicnode.com",
+            "https://1rpc.io/base",
+            "https://mainnet.base.org",
         ]
-        primary_rpc = get_env("ALCHEMY_BASE_URL") or _base_rpc_pool[2]
+        primary_rpc = get_env("ALCHEMY_BASE_URL") or _base_rpc_pool[0]
         self._rpc_urls: list[str] = list(dict.fromkeys([primary_rpc] + _base_rpc_pool))
         self._active_rpc: str = primary_rpc
 
@@ -827,9 +826,30 @@ class AaveLiquidatorBot:
             logger.debug("AaveLiquidator: 0 posições elegíveis (%d candidatos)", len(candidates))
             return []
 
-        # Fase 2: getUserReserveData dos elegíveis × reserves → 1-2 Multicall3
+        # Fase 2: reserve_data só para posições iminentes (HF < _HF_RESERVE_THRESHOLD).
+        # Posições HF >= _HF_RESERVE_THRESHOLD são apenas monitorizadas — sem reserve_data
+        # nem _estimate, o que elimina a fase mais lenta (~2s) nos ticks normais.
+        imminent     = [(b, hf, col, debt) for b, hf, col, debt in eligible
+                        if hf < _HF_RESERVE_THRESHOLD]
+        monitor_only = [(b, hf, col, debt) for b, hf, col, debt in eligible
+                        if hf >= _HF_RESERVE_THRESHOLD]
+
+        if monitor_only:
+            for b, hf, col, debt in monitor_only:
+                logger.info(
+                    "Tick: monitorar %s HF=%.4f col=$%.0f debt=$%.0f (aguarda HF<%.2f)",
+                    b[:10] + "…", hf, col, debt, _HF_RESERVE_THRESHOLD,
+                )
+
+        if not imminent:
+            logger.info(
+                "AaveLiquidator: 0 iminentes, %d monitorizados (%d candidatos)",
+                len(monitor_only), len(candidates),
+            )
+            return []
+
         reserves     = self._reserves_list()
-        reserve_data = self._batch_reserve_data([b for b, *_ in eligible], reserves)
+        reserve_data = self._batch_reserve_data([b for b, *_ in imminent], reserves)
 
         # Nonce sequencial: 1 fetch por tick, incrementa só quando TX é aceite
         _pk    = get_env("BSC_PRIVATE_KEY") or ""
@@ -848,19 +868,19 @@ class AaveLiquidatorBot:
 
         # Sumário do tick
         _now_tick    = time.time()
-        _n_liq       = sum(1 for _, hf, _, _ in eligible if hf < _HF_LIQUIDATABLE)
-        _n_cooldown  = sum(1 for b, *_ in eligible if self._cooldown.get(b.lower(), 0) > _now_tick)
+        _n_liq       = sum(1 for _, hf, _, _ in imminent if hf < _HF_LIQUIDATABLE)
+        _n_cooldown  = sum(1 for b, *_ in imminent if self._cooldown.get(b.lower(), 0) > _now_tick)
         _n_blacklist = len(self._blacklist)
         logger.info(
-            "Tick: %d elegíveis | %d liquidáveis (HF<1.0) | %d cooldown | %d blacklist",
-            len(eligible), _n_liq, _n_cooldown, _n_blacklist,
+            "Tick: %d elegíveis (%d iminentes) | %d liquidáveis (HF<1.0) | %d cooldown | %d blacklist",
+            len(eligible), len(imminent), _n_liq, _n_cooldown, _n_blacklist,
         )
 
         # ── Bundle attempt (Phase 6) ──────────────────────────────────────────
         bundled: set[str] = set()
         if not self.dry_run and _n_liq >= 2:
             _bdl_list = []
-            for _b, _hf, _cu, _du in eligible:
+            for _b, _hf, _cu, _du in imminent:
                 _bl = _b.lower()
                 if _bl in self._blacklist: continue
                 if _hf >= _HF_LIQUIDATABLE: continue
@@ -879,7 +899,7 @@ class AaveLiquidatorBot:
                     logger.info("AaveBase: %d liquidações via Flashbots bundle", len(bundled))
 
         results: list[dict] = []
-        for borrower, hf, col_usd, debt_usd in eligible:
+        for borrower, hf, col_usd, debt_usd in imminent:
             _b_low = borrower.lower()
 
             # Blacklist permanente: salta se HF não mudou > 5%

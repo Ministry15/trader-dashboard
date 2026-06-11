@@ -61,10 +61,8 @@ _GAS_UNITS        = 500_000    # absorb() + buyCollateral() estimativa
 _ABSORB_DISCOUNT  = 0.05       # desconto conservador de 5% no buyCollateral
 _BASE_FALLBACK_RPC  = "https://mainnet.base.org"
 _BASE_EXTRA_RPCS    = [
-    "https://base.gateway.tenderly.co",
-    "https://base.meowrpc.com",
-    "https://base-pokt.nodies.app",
-    "https://base-rpc.publicnode.com",
+    "https://1rpc.io/base",
+    "https://mainnet.base.org",
 ]
 _BASE_WSS_PRIMARY  = "wss://base.publicnode.com"
 _BASE_WSS_FALLBACK = "wss://base.drpc.org"

@@ -47,11 +47,9 @@ _ORACLE_SCALE     = 10 ** 36   # Morpho oracles: price × 1e36 (já inclui decim
 _LLTV_SCALE       = 10 ** 18   # LLTV em WAD
 _GAS_UNITS        = 350_000    # liquidate() na Base
 _BASE_RPC_POOL = [
-    "https://base.gateway.tenderly.co",
-    "https://base.meowrpc.com",
-    "https://mainnet.base.org",
-    "https://base-pokt.nodies.app",
     "https://base-rpc.publicnode.com",
+    "https://1rpc.io/base",
+    "https://mainnet.base.org",
 ]
 
 _HF_LIQUIDATABLE = 1.0      # Morpho: só liquidável quando HF < 1.0
