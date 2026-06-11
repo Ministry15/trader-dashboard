@@ -792,10 +792,6 @@ class AaveLiquidatorBot:
     # ── tick ─────────────────────────────────────────────────────────────────
 
     def tick(self) -> list[dict]:
-        if not self._connected():
-            logger.warning("AaveLiquidator: sem ligação ao RPC Base — tick saltado")
-            return []
-
         self._scan_borrowers()
         self._price_cache = {}
 
