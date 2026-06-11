@@ -53,6 +53,7 @@ _BONUS: dict[str, float] = {
     "0x4200000000000000000000000000000000000006": 0.050,  # WETH  → 5%
     "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": 0.050,  # USDC  → 5%
     "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": 0.050,  # USDbC → 5%
+    "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": 0.075,  # cbBTC → 7.5%
     "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": 0.075,  # cbETH → 7.5%
     "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452": 0.070,  # wstETH→ 7%
 }
