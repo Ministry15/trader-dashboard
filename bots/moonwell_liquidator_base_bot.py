@@ -49,8 +49,13 @@ _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(name)s: %(mess
 logger.addHandler(_fh)
 
 # ── RPC ───────────────────────────────────────────────────────────────────────
-_BASE_RPC_PRIMARY  = "https://base.publicnode.com"
-_BASE_RPC_FALLBACK = "https://mainnet.base.org"
+_BASE_RPC_POOL = [
+    "https://base.gateway.tenderly.co",
+    "https://base.meowrpc.com",
+    "https://mainnet.base.org",
+    "https://base-pokt.nodies.app",
+    "https://base-rpc.publicnode.com",
+]
 _BASE_WSS_PRIMARY  = "wss://base.publicnode.com"
 _BASE_WSS_FALLBACK = "wss://base.drpc.org"
 
@@ -172,8 +177,8 @@ class MoonwellLiquidatorBaseBot:
         self.settings = settings
         self.cfg = settings.get("bots", {}).get("moonwell_liquidator_base", {})
 
-        primary_rpc = get_env("BASE_RPC_URL") or _BASE_RPC_PRIMARY
-        self._rpc_urls  = [primary_rpc, _BASE_RPC_FALLBACK]
+        primary_rpc = get_env("BASE_RPC_URL") or _BASE_RPC_POOL[2]
+        self._rpc_urls  = list(dict.fromkeys([primary_rpc] + _BASE_RPC_POOL))
         self._active_rpc = primary_rpc
 
         self.hf_threshold = float(self.cfg.get("health_factor_threshold", 1.05))

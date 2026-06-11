@@ -261,16 +261,15 @@ class AaveLiquidatorBot:
         self.settings = settings or get_settings()
         self.cfg = self.settings.get("bots", {}).get("aave_liquidator", {})
 
-        primary_rpc = get_env("ALCHEMY_BASE_URL") or "https://base-rpc.publicnode.com"
-        self._rpc_urls: list[str] = [
-            primary_rpc,
+        _base_rpc_pool = [
+            "https://base.gateway.tenderly.co",
+            "https://base.meowrpc.com",
             "https://mainnet.base.org",
-            "https://base.drpc.org",
+            "https://base-pokt.nodies.app",
             "https://base-rpc.publicnode.com",
         ]
-        # Deduplica mantendo a ordem
-        seen: set[str] = set()
-        self._rpc_urls = [u for u in self._rpc_urls if not (u in seen or seen.add(u))]
+        primary_rpc = get_env("ALCHEMY_BASE_URL") or _base_rpc_pool[2]
+        self._rpc_urls: list[str] = list(dict.fromkeys([primary_rpc] + _base_rpc_pool))
         self._active_rpc: str = primary_rpc
 
         self.dry_run     : bool  = False

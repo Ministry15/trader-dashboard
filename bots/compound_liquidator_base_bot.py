@@ -59,10 +59,12 @@ _PRICE_DECIMALS   = 8          # getPrice retorna USD × 1e8
 _CF_SCALE         = 1e18       # borrowCollateralFactor / liquidateCollateralFactor em 1e18
 _GAS_UNITS        = 500_000    # absorb() + buyCollateral() estimativa
 _ABSORB_DISCOUNT  = 0.05       # desconto conservador de 5% no buyCollateral
-_BASE_FALLBACK_RPC  = "https://base.publicnode.com"
+_BASE_FALLBACK_RPC  = "https://mainnet.base.org"
 _BASE_EXTRA_RPCS    = [
-    "https://base.drpc.org",
-    "https://1rpc.io/base",
+    "https://base.gateway.tenderly.co",
+    "https://base.meowrpc.com",
+    "https://base-pokt.nodies.app",
+    "https://base-rpc.publicnode.com",
 ]
 _BASE_WSS_PRIMARY  = "wss://base.publicnode.com"
 _BASE_WSS_FALLBACK = "wss://base.drpc.org"

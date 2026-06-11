@@ -46,8 +46,13 @@ BASE_CHAIN_ID     = 8453
 _ORACLE_SCALE     = 10 ** 36   # Morpho oracles: price × 1e36 (já inclui decimal scaling)
 _LLTV_SCALE       = 10 ** 18   # LLTV em WAD
 _GAS_UNITS        = 350_000    # liquidate() na Base
-_FALLBACK_RPC_1   = "https://base.drpc.org"
-_FALLBACK_RPC_2   = "https://base.publicnode.com"
+_BASE_RPC_POOL = [
+    "https://base.gateway.tenderly.co",
+    "https://base.meowrpc.com",
+    "https://mainnet.base.org",
+    "https://base-pokt.nodies.app",
+    "https://base-rpc.publicnode.com",
+]
 
 _HF_LIQUIDATABLE = 1.0      # Morpho: só liquidável quando HF < 1.0
 
@@ -211,8 +216,8 @@ class MorphoLiquidatorBaseBot:
         self.settings = settings or get_settings()
         self.cfg = self.settings.get("bots", {}).get("morpho_liquidator_base", {})
 
-        primary_rpc = get_env("ALCHEMY_BASE_URL") or _FALLBACK_RPC_1
-        self._rpc_urls: list[str] = [primary_rpc, _FALLBACK_RPC_1, _FALLBACK_RPC_2]
+        primary_rpc = get_env("ALCHEMY_BASE_URL") or _BASE_RPC_POOL[2]
+        self._rpc_urls: list[str] = list(dict.fromkeys([primary_rpc] + _BASE_RPC_POOL))
         self._active_rpc: str = primary_rpc
 
         self.dry_run      : bool  = False
