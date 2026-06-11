@@ -61,7 +61,8 @@ _BONUS: dict[str, float] = {
 }
 _DEFAULT_BONUS    = 0.050  # 5% conservador
 
-_HF_LIQUIDATABLE = 1.0      # Aave V3: só liquidável quando HF < 1.0 (monitorização em 1.2)
+_HF_LIQUIDATABLE      = 1.0   # Aave V3: só liquidável quando HF < 1.0
+_HF_RESERVE_THRESHOLD = 1.05  # reserve_data + _estimate só para HF < 1.05
 
 _FLASHBOTS_ENDPOINT      = "https://polygon.flashbots.net"
 _FLASHBOTS_MIN_PROFIT_USD = 200.0
@@ -830,10 +831,6 @@ class AaveLiquidatorPolygonBot:
     # ── tick ─────────────────────────────────────────────────────────────────
 
     def tick(self) -> list[dict]:
-        if not self._connected():
-            logger.warning("AavePolygon: sem ligação ao RPC Polygon — tick saltado")
-            return []
-
         self._scan_borrowers()
         self._price_cache = {}
 
@@ -865,9 +862,28 @@ class AaveLiquidatorPolygonBot:
             logger.debug("AavePolygon: 0 posições elegíveis (%d candidatos)", len(candidates))
             return []
 
-        # Fase 2: getUserReserveData dos elegíveis × reserves → 1-2 Multicall3
+        # Fase 2: reserve_data só para posições iminentes (HF < _HF_RESERVE_THRESHOLD)
+        imminent     = [(b, hf, col, debt) for b, hf, col, debt in eligible
+                        if hf < _HF_RESERVE_THRESHOLD]
+        monitor_only = [(b, hf, col, debt) for b, hf, col, debt in eligible
+                        if hf >= _HF_RESERVE_THRESHOLD]
+
+        if monitor_only:
+            for b, hf, col, debt in monitor_only:
+                logger.info(
+                    "Tick: monitorar %s HF=%.4f col=$%.0f debt=$%.0f (aguarda HF<%.2f)",
+                    b[:10] + "…", hf, col, debt, _HF_RESERVE_THRESHOLD,
+                )
+
+        if not imminent:
+            logger.info(
+                "AavePolygon: 0 iminentes, %d monitorizados (%d candidatos)",
+                len(monitor_only), len(candidates),
+            )
+            return []
+
         reserves     = self._reserves_list()
-        reserve_data = self._batch_reserve_data([b for b, *_ in eligible], reserves)
+        reserve_data = self._batch_reserve_data([b for b, *_ in imminent], reserves)
 
         # Saldo mínimo: suspende execução se POL insuficiente para gas (verifica carteira primária)
         if not self.dry_run:
@@ -883,18 +899,18 @@ class AaveLiquidatorPolygonBot:
 
         # Sumário do tick
         _now_tick    = time.time()
-        _n_liq       = sum(1 for _, hf, _, _ in eligible if hf < _HF_LIQUIDATABLE)
-        _n_cooldown  = sum(1 for b, *_ in eligible if self._cooldown.get(b.lower(), 0) > _now_tick)
+        _n_liq       = sum(1 for _, hf, _, _ in imminent if hf < _HF_LIQUIDATABLE)
+        _n_cooldown  = sum(1 for b, *_ in imminent if self._cooldown.get(b.lower(), 0) > _now_tick)
         _n_blacklist = len(self._blacklist)
         logger.info(
-            "AavePolygon Tick: %d elegíveis | %d liquidáveis (HF<1.0) | %d cooldown | %d blacklist",
-            len(eligible), _n_liq, _n_cooldown, _n_blacklist,
+            "AavePolygon Tick: %d elegíveis (%d iminentes) | %d liquidáveis (HF<1.0) | %d cooldown | %d blacklist",
+            len(eligible), len(imminent), _n_liq, _n_cooldown, _n_blacklist,
         )
 
         # ── Fase 1: estimar todas as oportunidades ────────────────────────────
         _now_exec = time.time()
         opp_list: list[tuple] = []  # (opp, _b_low, should_execute)
-        for borrower, hf, col_usd, debt_usd in eligible:
+        for borrower, hf, col_usd, debt_usd in imminent:
             _b_low = borrower.lower()
 
             if _b_low in self._blacklist:

@@ -89,6 +89,9 @@ async def run() -> None:
                         continue
 
                     block_num = int(msg["params"]["result"].get("number", "0x0"), 16)
+                    if block_num % 2 != 0:
+                        logger.debug("run_aave_polygon_ws: bloco %d ímpar — saltado", block_num)
+                        continue
                     logger.info("run_aave_polygon_ws: bloco %d → tick", block_num)
 
                     asyncio.create_task(_safe_tick(bot, tick_lock))
