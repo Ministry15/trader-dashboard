@@ -1,0 +1,19 @@
+[Unit]
+Description=Liquidator Bot — Compound V3 Base
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/crypto_bsc
+EnvironmentFile=/opt/crypto_bsc/.env
+ExecStart=/opt/crypto_bsc/venv/bin/python /opt/crypto_bsc/run_bot.py bots.compound_liquidator_base_bot CompoundLiquidatorBaseBot 300
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=liquidator-compound-base
+
+[Install]
+WantedBy=multi-user.target

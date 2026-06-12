@@ -1,0 +1,19 @@
+[Unit]
+Description=Liquidator Bot — Morpho Blue Base
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/crypto_bsc
+EnvironmentFile=/opt/crypto_bsc/.env
+ExecStart=/opt/crypto_bsc/venv/bin/python /opt/crypto_bsc/run_bot.py bots.morpho_liquidator_base_bot MorphoLiquidatorBaseBot 300
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=liquidator-morpho-base
+
+[Install]
+WantedBy=multi-user.target
